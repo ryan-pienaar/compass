@@ -6,9 +6,10 @@ import type { getInsights } from "../../server/services/insights.ts";
 import type { BlockDTO, TaskDTO } from "../../server/services/dto.ts";
 import type { RoleRow } from "../../server/services/roles.ts";
 import type * as schema from "../../server/db/schema.ts";
+import { apiFetch } from "./api-fetch";
 
-/** Typed client for the local API (same origin; Vite proxies /api in dev). */
-export const api = hc<ApiType>("/api");
+/** Typed client for the API (same origin; Vite proxies /api in dev). Requests carry the user's token and time zone. */
+export const api = hc<ApiType>("/api", { fetch: apiFetch });
 
 export class ApiError extends Error {
   status: number;
@@ -64,8 +65,8 @@ export type Challenge = typeof schema.challenges.$inferSelect;
 export type ChallengeDay = typeof schema.challengeDays.$inferSelect;
 export type Assessment = typeof schema.assessments.$inferSelect;
 export type Week = typeof schema.weeks.$inferSelect;
-export type WeekBoard = ReturnType<typeof getBoard>;
-export type WeekReview = ReturnType<typeof getReview>;
-export type TodayData = ReturnType<typeof getToday>;
-export type Insights = ReturnType<typeof getInsights>;
+export type WeekBoard = Awaited<ReturnType<typeof getBoard>>;
+export type WeekReview = Awaited<ReturnType<typeof getReview>>;
+export type TodayData = Awaited<ReturnType<typeof getToday>>;
+export type Insights = Awaited<ReturnType<typeof getInsights>>;
 export type Bootstrap = OkJson<Awaited<ReturnType<typeof api.bootstrap.$get>>>;

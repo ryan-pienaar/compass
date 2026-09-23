@@ -5,6 +5,18 @@
     { "path": "./tsconfig.node.json" }
   ],
   "compilerOptions": {
+    /*
+     * Vercel compiles api/ (and what it imports) with these options: it reads only this
+     * file, not project references. Keep them in step with tsconfig.node.json. In
+     * particular, rewriteRelativeImportExtensions turns "./app.ts" into "./app.js" in the
+     * compiled function; without it the deployment fails with ERR_MODULE_NOT_FOUND.
+     */
+    "module": "nodenext",
+    "target": "es2023",
+    "types": ["node"],
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "paths": {
       "@/*": ["./src/*"],
       "@shared/*": ["./shared/*"]

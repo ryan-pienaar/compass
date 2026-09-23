@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Database, Download, HardDriveDownload, Upload } from "lucide-react";
+import { Database, Download, Upload } from "lucide-react";
 import { useTheme } from "@/components/theme";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, call } from "@/lib/api";
-import { fmtDate } from "@/lib/format";
+import { apiFetch } from "@/lib/api-fetch";
 import { useBootstrap } from "@/lib/hooks";
 import { useApiMutation } from "@/lib/mutations";
 import { dataInfoQuery } from "@/lib/queries";
@@ -203,7 +203,6 @@ function DataSection({ dev }: { dev: boolean }) {
   const { data: info } = useQuery(dataInfoQuery());
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingImport, setPendingImport] = useState<{ name: string; data: Record<string, unknown> } | null>(null);
-  const backup = useApiMutation(() => call(api.data.backup.$post()), { success: (r) => `Backup saved: ${r.file}` });
   const demo = useApiMutation(() => call(api.data.demo.$post()), {
     success: (r) => (r.seeded ? "Sample data loaded" : "reason" in r ? String(r.reason) : "Not loaded"),
   });
@@ -212,21 +211,26 @@ function DataSection({ dev }: { dev: boolean }) {
     {
       invalidate: false,
       onSuccess: async () => {
-        toast.success("Import complete. A backup of your previous data was saved first.");
+        toast.success("Import complete. A copy of your previous data was downloaded first.");
         await qc.resetQueries();
       },
     },
   );
 
-  const exportNow = async () => {
-    const res = await fetch("/api/data/export");
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+  /** Downloads everything as JSON. Returns false if the export failed. */
+  const exportNow = async (): Promise<boolean> => {
+    const res = await apiFetch("/api/data/export");
+    if (!res.ok) {
+      toast.error("Export failed. Please try again.");
+      return false;
+    }
+    const url = URL.createObjectURL(await res.blob());
     const a = document.createElement("a");
     a.href = url;
     a.download = `compass-export-${todayISO()}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    return true;
   };
 
   return (
@@ -235,9 +239,9 @@ function DataSection({ dev }: { dev: boolean }) {
         <p className="flex items-start gap-2 text-muted-foreground">
           <Database className="mt-0.5 size-4 shrink-0" />
           <span>
-            Everything is stored locally in one SQLite file. Nothing leaves this computer.
-            <br />
-            <code className="text-xs break-all text-foreground">{info?.dbPath ?? "…"}</code>
+            {dev
+              ? "Development mode: data is stored in the local development database."
+              : "Stored privately in your Compass account. Only you can see it. Export a copy whenever you like."}
           </span>
         </p>
         {info && (
@@ -252,9 +256,6 @@ function DataSection({ dev }: { dev: boolean }) {
         </Button>
         <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
           <Upload /> Import…
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => backup.mutate(undefined)} disabled={info?.dbPath === ":memory:"}>
-          <HardDriveDownload /> Back up now
         </Button>
         {dev && (
           <Button variant="ghost" size="sm" onClick={() => demo.mutate(undefined)}>
@@ -279,34 +280,22 @@ function DataSection({ dev }: { dev: boolean }) {
           }}
         />
       </div>
-      {info && info.backups.length > 0 && (
-        <div className="px-4 py-3">
-          <div className="mb-1 text-xs font-medium text-muted-foreground">Recent backups (one is made automatically each day you use Compass)</div>
-          <ul className="space-y-0.5 text-xs text-muted-foreground">
-            {info.backups.slice(0, 5).map((b) => (
-              <li key={b.file} className="flex justify-between gap-3">
-                <span className="truncate">{b.name}</span>
-                <span className="shrink-0">{fmtDate(b.createdAt, "d MMM HH:mm")}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
       <AlertDialog open={!!pendingImport} onOpenChange={(o) => !o && setPendingImport(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Replace everything with {pendingImport?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Your current data will be replaced by the contents of this export. A backup of the current database is saved first, so you can
-              recover it.
+              Your current data will be replaced by the contents of this export. A copy of your current data is downloaded first, so you can
+              import it again to undo.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => {
-                if (pendingImport) importData.mutate(pendingImport.data);
+              onClick={async () => {
+                const next = pendingImport;
                 setPendingImport(null);
+                if (next && (await exportNow())) importData.mutate(next.data);
               }}
             >
               Replace my data

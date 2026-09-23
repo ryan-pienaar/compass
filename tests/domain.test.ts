@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkAffirmation } from "../shared/affirmation.ts";
-import { formatWeekRange, weekDays, weekStartFor } from "../shared/dates.ts";
+import { dateInZone, formatWeekRange, isValidTimeZone, startOfDayInZone, weekDays, weekStartFor } from "../shared/dates.ts";
 import { integritySummary } from "../shared/integrity.ts";
 import { analyzeLanguage } from "../shared/language.ts";
 import { effectiveTriage, flagsForQuadrant, isDueSoon, quadrantOf, urgencyToStore } from "../shared/quadrant.ts";
@@ -148,5 +148,17 @@ describe("dates", () => {
       "2026-10-04",
     ]);
     expect(formatWeekRange("2026-09-28")).toBe("28 Sep – 4 Oct 2026");
+  });
+
+  it("works out dates in the user's time zone, not the server's", () => {
+    // 23:30 UTC is already tomorrow in London (BST) but still today in New York.
+    expect(dateInZone("2026-09-23T23:30:00Z", "Europe/London")).toBe("2026-09-24");
+    expect(dateInZone("2026-09-23T23:30:00Z", "America/New_York")).toBe("2026-09-23");
+    expect(startOfDayInZone("2026-09-24", "Europe/London")).toBe("2026-09-23T23:00:00.000Z");
+    // Clocks go back at 02:00 on 25 October: that midnight is still BST, the next one is GMT.
+    expect(startOfDayInZone("2026-10-25", "Europe/London")).toBe("2026-10-24T23:00:00.000Z");
+    expect(startOfDayInZone("2026-10-26", "Europe/London")).toBe("2026-10-26T00:00:00.000Z");
+    expect(isValidTimeZone("Africa/Johannesburg")).toBe(true);
+    expect(isValidTimeZone("Mars/Olympus_Mons")).toBe(false);
   });
 });

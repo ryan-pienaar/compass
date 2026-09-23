@@ -1,7 +1,17 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { CalendarCheck, Compass, Monitor, Moon, Plus, Settings, Sun } from "lucide-react";
+import { CalendarCheck, Compass, LogOut, Monitor, Moon, Plus, Settings, Sun, UserRound } from "lucide-react";
 import { useTheme } from "@/components/theme";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -17,6 +27,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { api, call } from "@/lib/api";
+import { useAccount } from "@/lib/auth";
 import { formatWeekRange } from "@/lib/format";
 import { useBootstrap } from "@/lib/hooks";
 import { useApiMutation } from "@/lib/mutations";
@@ -122,6 +133,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <ThemeMenu />
           </SidebarMenuItem>
+          <AccountItem />
         </SidebarMenu>
       </SidebarFooter>
       <SidebarRail />
@@ -160,5 +172,34 @@ function ThemeMenu() {
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/** Who is signed in, with a way out. Hidden in local development (no Auth0). */
+function AccountItem() {
+  const account = useAccount();
+  if (!account) return null;
+  return (
+    <SidebarMenuItem>
+      <DropdownMenu>
+        <DropdownMenuTrigger render={<SidebarMenuButton tooltip={account.name} />}>
+          {account.picture ? (
+            <img src={account.picture} alt="" referrerPolicy="no-referrer" className="size-4 shrink-0 rounded-full" />
+          ) : (
+            <UserRound />
+          )}
+          <span className="truncate">{account.name}</span>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="right" align="end" className="w-56">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{account.email ?? account.name}</DropdownMenuLabel>
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={account.signOut}>
+            <LogOut /> Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </SidebarMenuItem>
   );
 }

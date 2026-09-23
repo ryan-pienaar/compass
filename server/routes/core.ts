@@ -3,9 +3,8 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { ROLE_COLORS } from "../../shared/content.ts";
 import type { Settings } from "../../shared/settings.ts";
-import { addWeeksISO, todayISO, weekStartFor, type WeekStartsOn } from "../../shared/dates.ts";
-import type { AppContext } from "../context.ts";
-import { backupDatabase, listBackups } from "../db/client.ts";
+import { addWeeksISO, weekdayInZone, weekStartFor, type WeekStartsOn } from "../../shared/dates.ts";
+import type { ApiEnv, AppContext, Scope } from "../context.ts";
 import { delegations, goals, missions, roles, tasks } from "../db/schema.ts";
 import { v } from "../lib/validate.ts";
 import { countAll, exportAll, importAll } from "../services/data.ts";
@@ -50,111 +49,140 @@ const onboardingSchema = z.object({
   mission: z.string().max(20000).default(""),
 });
 
+async function bootstrap(s: Scope, dev: boolean) {
+  const settings = await getSettings(s);
+  const today = s.today;
+  const weekStart = weekStartFor(today, settings.weekStartsOn);
+  const nextWeekStart = addWeeksISO(weekStart, 1);
+  const [week, nextWeek, missionRows, inboxRows, checkinRows, roleList] = await Promise.all([
+    getWeek(s, weekStart),
+    getWeek(s, nextWeekStart),
+    s.db
+      .select()
+      .from(missions)
+      .where(and(eq(missions.userId, s.userId), eq(missions.kind, "personal")))
+      .orderBy(asc(missions.createdAt))
+      .limit(1),
+    s.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.userId, s.userId),
+          eq(tasks.status, "open"),
+          eq(tasks.kind, "task"),
+          isNull(tasks.important),
+          isNull(tasks.roleId),
+          isNull(tasks.goalId),
+        ),
+      ),
+    s.db
+      .select({ id: delegations.id })
+      .from(delegations)
+      .where(
+        and(
+          eq(delegations.userId, s.userId),
+          eq(delegations.status, "active"),
+          isNotNull(delegations.nextCheckin),
+          lte(delegations.nextCheckin, today),
+        ),
+      ),
+    listRoles(s),
+  ]);
+  const mission = missionRows[0];
+
+  // Which week the weekly ritual should target right now.
+  const dow = weekdayInZone(s.timeZone);
+  const lastDayOfWeek = (settings.weekStartsOn + 6) % 7;
+  const currentPlanned = week ? week.status !== "draft" : false;
+  const nextPlanned = nextWeek ? nextWeek.status !== "draft" : false;
+  let planTarget: string | null = null;
+  if (!currentPlanned) planTarget = weekStart;
+  else if (!nextPlanned && (dow === settings.planningDay || dow === lastDayOfWeek)) planTarget = nextWeekStart;
+
+  return {
+    settings,
+    today,
+    weekStart,
+    weekStatus: week?.status ?? null,
+    nextWeekStart,
+    nextWeekStatus: nextWeek?.status ?? null,
+    planTarget,
+    roles: roleList,
+    mission: mission
+      ? { hasContent: mission.content.trim().length > 0, updatedAt: mission.updatedAt, reviewedAt: mission.reviewedAt }
+      : { hasContent: false, updatedAt: null, reviewedAt: null },
+    counts: { inbox: inboxRows.length, checkinsDue: checkinRows.length },
+    dev,
+  };
+}
+
 export const coreRoutes = (ctx: AppContext) =>
-  new Hono()
-    .get("/bootstrap", (c) => {
-      const { db } = ctx;
-      const settings = getSettings(db);
-      const today = todayISO();
-      const weekStart = weekStartFor(today, settings.weekStartsOn);
-      const nextWeekStart = addWeeksISO(weekStart, 1);
-      const week = getWeek(db, weekStart);
-      const nextWeek = getWeek(db, nextWeekStart);
-      const mission = db.select().from(missions).where(eq(missions.kind, "personal")).orderBy(asc(missions.createdAt)).get();
-      const inbox = db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .where(
-          and(eq(tasks.status, "open"), eq(tasks.kind, "task"), isNull(tasks.important), isNull(tasks.roleId), isNull(tasks.goalId)),
-        )
-        .all().length;
-      const checkinsDue = db
-        .select({ id: delegations.id })
-        .from(delegations)
-        .where(and(eq(delegations.status, "active"), isNotNull(delegations.nextCheckin), lte(delegations.nextCheckin, today)))
-        .all().length;
-
-      // Which week the weekly ritual should target right now.
-      const dow = new Date().getDay();
-      const lastDayOfWeek = (settings.weekStartsOn + 6) % 7;
-      const currentPlanned = week ? week.status !== "draft" : false;
-      const nextPlanned = nextWeek ? nextWeek.status !== "draft" : false;
-      let planTarget: string | null = null;
-      if (!currentPlanned) planTarget = weekStart;
-      else if (!nextPlanned && (dow === settings.planningDay || dow === lastDayOfWeek)) planTarget = nextWeekStart;
-
-      return c.json({
-        settings,
-        today,
-        weekStart,
-        weekStatus: week?.status ?? null,
-        nextWeekStart,
-        nextWeekStatus: nextWeek?.status ?? null,
-        planTarget,
-        roles: listRoles(db),
-        mission: mission
-          ? { hasContent: mission.content.trim().length > 0, updatedAt: mission.updatedAt, reviewedAt: mission.reviewedAt }
-          : { hasContent: false, updatedAt: null, reviewedAt: null },
-        counts: { inbox, checkinsDue },
-        dev: ctx.dev,
-      });
-    })
-    .get("/settings", (c) => c.json(getSettings(ctx.db)))
-    .patch("/settings", v("json", settingsPatch), (c) =>
-      c.json(updateSettings(ctx.db, c.req.valid("json") as Partial<Settings>)),
+  new Hono<ApiEnv>()
+    .get("/bootstrap", async (c) => c.json(await bootstrap(c.var.scope, ctx.dev)))
+    .get("/settings", async (c) => c.json(await getSettings(c.var.scope)))
+    .patch("/settings", v("json", settingsPatch), async (c) =>
+      c.json(await updateSettings(c.var.scope, c.req.valid("json") as Partial<Settings>)),
     )
-    .post("/onboarding", v("json", onboardingSchema), (c) => {
+    .post("/onboarding", v("json", onboardingSchema), async (c) => {
       const input = c.req.valid("json");
-      const { db } = ctx;
-      const created = db.transaction((tx) => {
-        const txdb = tx as unknown as typeof db;
-        let order = nextRoleSortOrder(txdb);
-        const existing = new Set(listRoles(txdb).map((r) => r.name.toLowerCase()));
-        const roleIds: (string | null)[] = input.roles.map((r, i) => {
-          if (existing.has(r.name.toLowerCase())) {
-            return listRoles(txdb).find((x) => x.name.toLowerCase() === r.name.toLowerCase())?.id ?? null;
+      const s = c.var.scope;
+      const created = await s.db.transaction(async (tx) => {
+        const ts: Scope = { ...s, db: tx };
+        let order = await nextRoleSortOrder(ts);
+        const existing = await listRoles(ts);
+        const byName = new Map(existing.map((r) => [r.name.toLowerCase(), r.id]));
+        const roleIds: (string | null)[] = [];
+        for (const [i, r] of input.roles.entries()) {
+          const known = byName.get(r.name.toLowerCase());
+          if (known) {
+            roleIds.push(known);
+            continue;
           }
-          const row = tx
+          const [row] = await tx
             .insert(roles)
             .values({
+              userId: s.userId,
               name: r.name,
               description: r.description ?? "",
               color: r.color ?? ROLE_COLORS[i % ROLE_COLORS.length],
               sortOrder: order++,
             })
-            .returning()
-            .get();
-          return row.id;
-        });
-        ensureSawRole(txdb);
+            .returning();
+          byName.set(r.name.toLowerCase(), row.id);
+          roleIds.push(row.id);
+        }
+        await ensureSawRole(ts);
         const pick = (idx: number | null | undefined) => (idx != null && idx >= 0 ? (roleIds[idx] ?? null) : null);
         if (input.openingPersonal.trim()) {
-          tx.insert(goals)
-            .values({
-              title: input.openingPersonal.trim(),
-              roleId: pick(input.openingPersonalRole),
-              endInMind: "Done regularly, this would make a tremendous positive difference in my personal life.",
-            })
-            .run();
+          await tx.insert(goals).values({
+            userId: s.userId,
+            title: input.openingPersonal.trim(),
+            roleId: pick(input.openingPersonalRole),
+            endInMind: "Done regularly, this would make a tremendous positive difference in my personal life.",
+          });
         }
         if (input.openingProfessional.trim()) {
-          tx.insert(goals)
-            .values({
-              title: input.openingProfessional.trim(),
-              roleId: pick(input.openingProfessionalRole),
-              endInMind: "Done regularly, this would make a tremendous positive difference in my work.",
-            })
-            .run();
+          await tx.insert(goals).values({
+            userId: s.userId,
+            title: input.openingProfessional.trim(),
+            roleId: pick(input.openingProfessionalRole),
+            endInMind: "Done regularly, this would make a tremendous positive difference in my work.",
+          });
         }
-        const mission = tx.select().from(missions).where(eq(missions.kind, "personal")).get();
+        const [mission] = await tx
+          .select()
+          .from(missions)
+          .where(and(eq(missions.userId, s.userId), eq(missions.kind, "personal")))
+          .limit(1);
         if (!mission) {
-          tx.insert(missions).values({ kind: "personal", title: "My mission", content: input.mission }).run();
+          await tx.insert(missions).values({ userId: s.userId, kind: "personal", title: "My mission", content: input.mission });
         } else if (input.mission.trim() && !mission.content.trim()) {
-          tx.update(missions).set({ content: input.mission }).where(eq(missions.id, mission.id)).run();
+          await tx.update(missions).set({ content: input.mission }).where(eq(missions.id, mission.id));
         }
         return roleIds.length;
       });
-      const settings = updateSettings(db, {
+      const settings = await updateSettings(s, {
         displayName: input.displayName,
         weekStartsOn: input.weekStartsOn as WeekStartsOn,
         planningDay: input.planningDay,
@@ -166,35 +194,23 @@ export const coreRoutes = (ctx: AppContext) =>
       });
       return c.json({ settings, rolesCreated: created });
     })
-    .get("/data/info", (c) =>
-      c.json({
-        dbPath: ctx.dbPath,
-        dev: ctx.dev,
-        counts: countAll(ctx.db),
-        backups: listBackups(ctx.dbPath).slice(0, 20),
-      }),
-    )
-    .get("/data/export", (c) => {
-      const data = exportAll(ctx.db);
-      const stamp = todayISO();
-      c.header("Content-Disposition", `attachment; filename="compass-export-${stamp}.json"`);
+    .get("/data/info", async (c) => c.json({ dev: ctx.dev, counts: await countAll(c.var.scope) }))
+    .get("/data/export", async (c) => {
+      const s = c.var.scope;
+      const data = await exportAll(s);
+      c.header("Content-Disposition", `attachment; filename="compass-export-${s.today}.json"`);
       return c.json(data);
     })
-    .post("/data/import", v("json", z.object({ confirm: z.literal("REPLACE"), data: z.record(z.string(), z.unknown()) })), (c) => {
+    .post("/data/import", v("json", z.object({ confirm: z.literal("REPLACE"), data: z.record(z.string(), z.unknown()) })), async (c) => {
       const { data } = c.req.valid("json");
-      const backup = ctx.dbPath === ":memory:" ? null : backupDatabase(ctx.client, ctx.dbPath, { label: "pre-import" });
       try {
-        const counts = importAll(ctx.db, ctx.client, data as Parameters<typeof importAll>[2]);
-        return c.json({ ok: true as const, counts, backup });
+        const counts = await importAll(c.var.scope, data as Parameters<typeof importAll>[1]);
+        return c.json({ ok: true as const, counts });
       } catch (e) {
-        return c.json({ error: e instanceof Error ? e.message : "Import failed", backup }, 400);
+        return c.json({ error: e instanceof Error ? e.message : "Import failed" }, 400);
       }
     })
-    .post("/data/backup", (c) => {
-      if (ctx.dbPath === ":memory:") return c.json({ error: "In-memory database" }, 400);
-      return c.json({ file: backupDatabase(ctx.client, ctx.dbPath, { label: "manual" }) });
-    })
-    .post("/data/demo", (c) => {
+    .post("/data/demo", async (c) => {
       if (!ctx.dev) return c.json({ error: "Sample data is only available in development mode." }, 403);
-      return c.json(seedDemo(ctx.db));
+      return c.json(await seedDemo(c.var.scope));
     });

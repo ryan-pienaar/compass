@@ -1,11 +1,11 @@
 import { and, asc, desc, eq, isNull, lt, ne, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
-import { isValidISODate, todayISO } from "../../shared/dates.ts";
-import type { AppContext } from "../context.ts";
+import type { ApiEnv, AppContext } from "../context.ts";
 import { blocks, journal, tasks, weeks } from "../db/schema.ts";
 import { idParam, isoDate, minuteOfDay, quadrantNum, sawDimension, startParam, v } from "../lib/validate.ts";
 import { byPriority, toBlockDTO, toTaskDTO } from "../services/dto.ts";
+import { assertOwned } from "../services/owned.ts";
 import { triageContext } from "../services/settings.ts";
 import { createPreventionTask, createTask, deleteTask, getTask, reorderDay, updateTask } from "../services/tasks.ts";
 import { getToday } from "../services/today.ts";
@@ -72,13 +72,13 @@ const reviewBody = z.object({
   wins: z.string().max(10000).optional(),
 });
 
-export const planRoutes = (ctx: AppContext) =>
-  new Hono()
+export const planRoutes = (_ctx: AppContext) =>
+  new Hono<ApiEnv>()
     /* ---------------- Weeks ---------------- */
-    .get("/weeks", v("query", z.object({ limit: z.coerce.number().int().min(1).max(104).optional() })), (c) =>
-      c.json(weekHistory(ctx.db, c.req.valid("query").limit ?? 12)),
+    .get("/weeks", v("query", z.object({ limit: z.coerce.number().int().min(1).max(104).optional() })), async (c) =>
+      c.json(await weekHistory(c.var.scope, c.req.valid("query").limit ?? 12)),
     )
-    .get("/weeks/:start", v("param", startParam), (c) => c.json(getBoard(ctx.db, c.req.valid("param").start)))
+    .get("/weeks/:start", v("param", startParam), async (c) => c.json(await getBoard(c.var.scope, c.req.valid("param").start)))
     .patch(
       "/weeks/:start",
       v("param", startParam),
@@ -94,20 +94,25 @@ export const planRoutes = (ctx: AppContext) =>
           })
           .partial(),
       ),
-      (c) => {
-        const week = ensureWeek(ctx.db, c.req.valid("param").start);
-        const row = ctx.db.update(weeks).set(c.req.valid("json")).where(eq(weeks.id, week.id)).returning().get();
+      async (c) => {
+        const s = c.var.scope;
+        const week = await ensureWeek(s, c.req.valid("param").start);
+        const [row] = await s.db
+          .update(weeks)
+          .set(c.req.valid("json"))
+          .where(and(eq(weeks.id, week.id), eq(weeks.userId, s.userId)))
+          .returning();
         return c.json(row);
       },
     )
-    .put("/weeks/:start/roles", v("param", startParam), v("json", z.object({ roleIds: z.array(z.string()) })), (c) => {
-      setWeekRoles(ctx.db, c.req.valid("param").start, c.req.valid("json").roleIds);
+    .put("/weeks/:start/roles", v("param", startParam), v("json", z.object({ roleIds: z.array(z.string()) })), async (c) => {
+      await setWeekRoles(c.var.scope, c.req.valid("param").start, c.req.valid("json").roleIds);
       return c.json({ ok: true });
     })
-    .post("/weeks/:start/commit", v("param", startParam), (c) => c.json(commitWeek(ctx.db, c.req.valid("param").start)))
-    .get("/weeks/:start/review", v("param", startParam), (c) => c.json(getReview(ctx.db, c.req.valid("param").start)))
-    .post("/weeks/:start/review", v("param", startParam), v("json", reviewBody), (c) =>
-      c.json(applyReview(ctx.db, c.req.valid("param").start, c.req.valid("json"))),
+    .post("/weeks/:start/commit", v("param", startParam), async (c) => c.json(await commitWeek(c.var.scope, c.req.valid("param").start)))
+    .get("/weeks/:start/review", v("param", startParam), async (c) => c.json(await getReview(c.var.scope, c.req.valid("param").start)))
+    .post("/weeks/:start/review", v("param", startParam), v("json", reviewBody), async (c) =>
+      c.json(await applyReview(c.var.scope, c.req.valid("param").start, c.req.valid("json"))),
     )
 
     /* ---------------- Tasks ---------------- */
@@ -122,53 +127,59 @@ export const planRoutes = (ctx: AppContext) =>
           kind: z.enum(["task", "goal"]).optional(),
         }),
       ),
-      (c) => {
+      async (c) => {
+        const s = c.var.scope;
         const q = c.req.valid("query");
-        const tctx = triageContext(ctx.db);
-        const conds = [];
+        const tctx = await triageContext(s);
+        const conds = [eq(tasks.userId, s.userId)];
         const view = q.view ?? "open";
         if (view === "open" || view === "inbox" || view === "backlog") conds.push(eq(tasks.status, "open"));
         if (view === "done") conds.push(eq(tasks.status, "done"));
         if (view === "dropped") conds.push(ne(tasks.status, "open"), ne(tasks.status, "done"));
         // The backlog also takes back anything planned for a day that has passed: it still needs a decision.
-        if (view === "backlog") conds.push(eq(tasks.kind, "task"), or(isNull(tasks.scheduledDate), lt(tasks.scheduledDate, tctx.today)));
+        if (view === "backlog") conds.push(eq(tasks.kind, "task"), or(isNull(tasks.scheduledDate), lt(tasks.scheduledDate, tctx.today))!);
         if (q.roleId) conds.push(eq(tasks.roleId, q.roleId));
         if (q.goalId) conds.push(eq(tasks.goalId, q.goalId));
         if (q.kind) conds.push(eq(tasks.kind, q.kind));
-        const rows = ctx.db
+        const rows = await s.db
           .select()
           .from(tasks)
-          .where(conds.length ? and(...conds) : undefined)
+          .where(and(...conds))
           .orderBy(view === "done" ? desc(tasks.completedAt) : asc(tasks.createdAt))
-          .limit(view === "done" || view === "all" || view === "dropped" ? 500 : 2000)
-          .all();
+          .limit(view === "done" || view === "all" || view === "dropped" ? 500 : 2000);
         let list = rows.map((r) => toTaskDTO(r, tctx));
         if (view === "inbox") list = list.filter((t) => t.inbox);
         return c.json(list);
       },
     )
-    .get("/tasks/:id", v("param", idParam), (c) => {
-      const row = getTask(ctx.db, c.req.valid("param").id);
+    .get("/tasks/:id", v("param", idParam), async (c) => {
+      const s = c.var.scope;
+      const row = await getTask(s, c.req.valid("param").id);
       if (!row) return c.json({ error: "Task not found" }, 404);
-      return c.json(toTaskDTO(row, triageContext(ctx.db)));
+      return c.json(toTaskDTO(row, await triageContext(s)));
     })
-    .post("/tasks", v("json", taskCreate), (c) => {
+    .post("/tasks", v("json", taskCreate), async (c) => {
+      const s = c.var.scope;
       const { weekStart, ...body } = c.req.valid("json");
-      const tctx = triageContext(ctx.db);
-      const weekId = weekStart ? ensureWeek(ctx.db, weekStart).id : undefined;
-      return c.json(createTask(ctx.db, { ...body, ...(weekId ? { weekId } : {}) }, tctx));
+      await assertOwned(s, { roleId: body.roleId, goalId: body.goalId, parentId: body.parentId, delegationId: body.delegationId });
+      const tctx = await triageContext(s);
+      const weekId = weekStart ? (await ensureWeek(s, weekStart)).id : undefined;
+      return c.json(await createTask(s, { ...body, ...(weekId ? { weekId } : {}) }, tctx));
     })
-    .patch("/tasks/:id", v("param", idParam), v("json", taskPatch), (c) => {
+    .patch("/tasks/:id", v("param", idParam), v("json", taskPatch), async (c) => {
+      const s = c.var.scope;
       const { weekStart, ...body } = c.req.valid("json");
-      const tctx = triageContext(ctx.db);
-      const patch = { ...body, ...(weekStart !== undefined ? { weekId: weekStart ? ensureWeek(ctx.db, weekStart).id : null } : {}) };
-      const row = updateTask(ctx.db, c.req.valid("param").id, patch, tctx);
+      await assertOwned(s, { roleId: body.roleId, goalId: body.goalId, parentId: body.parentId, delegationId: body.delegationId });
+      const tctx = await triageContext(s);
+      const patch = { ...body, ...(weekStart !== undefined ? { weekId: weekStart ? (await ensureWeek(s, weekStart)).id : null } : {}) };
+      const row = await updateTask(s, c.req.valid("param").id, patch, tctx);
       if (!row) return c.json({ error: "Task not found" }, 404);
       return c.json(row);
     })
-    .delete("/tasks/:id", v("param", idParam), (c) => c.json({ ok: deleteTask(ctx.db, c.req.valid("param").id) }))
-    .post("/tasks/:id/prevent", v("param", idParam), v("json", z.object({ title: z.string().max(500).optional() })), (c) => {
-      const row = createPreventionTask(ctx.db, c.req.valid("param").id, c.req.valid("json").title, triageContext(ctx.db));
+    .delete("/tasks/:id", v("param", idParam), async (c) => c.json({ ok: await deleteTask(c.var.scope, c.req.valid("param").id) }))
+    .post("/tasks/:id/prevent", v("param", idParam), v("json", z.object({ title: z.string().max(500).optional() })), async (c) => {
+      const s = c.var.scope;
+      const row = await createPreventionTask(s, c.req.valid("param").id, c.req.valid("json").title, await triageContext(s));
       if (!row) return c.json({ error: "Task not found" }, 404);
       return c.json(row);
     })
@@ -183,25 +194,24 @@ export const planRoutes = (ctx: AppContext) =>
           note: z.string().max(2000).optional(),
         }),
       ),
-      (c) => {
+      async (c) => {
+        const s = c.var.scope;
         const { id } = c.req.valid("param");
         const { toDate, reason, note } = c.req.valid("json");
-        const tctx = triageContext(ctx.db);
-        const current = getTask(ctx.db, id);
+        const tctx = await triageContext(s);
+        const current = await getTask(s, id);
         if (!current) return c.json({ error: "Task not found" }, 404);
-        const row = updateTask(ctx.db, id, { scheduledDate: toDate, priority: toDate ? current.priority : null }, tctx);
+        const row = await updateTask(s, id, { scheduledDate: toDate, priority: toDate ? current.priority : null }, tctx);
         // Record the moment of choice (no judgement, just awareness for the weekly review).
         if (reason) {
-          ctx.db
-            .insert(journal)
-            .values({
-              date: tctx.today,
-              kind: "choice",
-              title: current.title,
-              body: note ?? "",
-              data: { taskId: id, from: current.scheduledDate, to: toDate, reason },
-            })
-            .run();
+          await s.db.insert(journal).values({
+            userId: s.userId,
+            date: tctx.today,
+            kind: "choice",
+            title: current.title,
+            body: note ?? "",
+            data: { taskId: id, from: current.scheduledDate, to: toDate, reason },
+          });
         }
         return c.json(row);
       },
@@ -215,56 +225,65 @@ export const planRoutes = (ctx: AppContext) =>
           items: z.array(z.object({ id: z.string(), priority: z.enum(["A", "B", "C"]).nullable(), sortOrder: z.number() })),
         }),
       ),
-      (c) => {
-        reorderDay(ctx.db, c.req.valid("param").date, c.req.valid("json").items);
+      async (c) => {
+        await reorderDay(c.var.scope, c.req.valid("param").date, c.req.valid("json").items);
         return c.json({ ok: true });
       },
     )
 
     /* ---------------- Calendar blocks ---------------- */
-    .post("/blocks", v("json", z.object(blockFields).partial().required({ date: true, startMin: true, endMin: true })), (c) => {
+    .post("/blocks", v("json", z.object(blockFields).partial().required({ date: true, startMin: true, endMin: true })), async (c) => {
+      const s = c.var.scope;
       const body = c.req.valid("json");
       if (body.endMin <= body.startMin) return c.json({ error: "A block must end after it starts." }, 400);
-      const tctx = triageContext(ctx.db);
-      const task = body.taskId ? getTask(ctx.db, body.taskId) : undefined;
+      await assertOwned(s, { roleId: body.roleId });
+      const tctx = await triageContext(s);
+      const task = body.taskId ? await getTask(s, body.taskId) : undefined;
       if (body.taskId && !task) return c.json({ error: "Task not found" }, 404);
-      const row = ctx.db
+      const [row] = await s.db
         .insert(blocks)
         .values({
           ...body,
+          userId: s.userId,
           title: body.title ?? task?.title ?? "",
           roleId: body.roleId !== undefined ? body.roleId : (task?.roleId ?? null),
           kind: body.kind ?? (task ? "focus" : "appointment"),
         })
-        .returning()
-        .get();
+        .returning();
       return c.json(toBlockDTO(row, task ? toTaskDTO(task, tctx) : undefined));
     })
-    .patch("/blocks/:id", v("param", idParam), v("json", z.object(blockFields).partial()), (c) => {
+    .patch("/blocks/:id", v("param", idParam), v("json", z.object(blockFields).partial()), async (c) => {
+      const s = c.var.scope;
       const { id } = c.req.valid("param");
       const body = c.req.valid("json");
-      const current = ctx.db.select().from(blocks).where(eq(blocks.id, id)).get();
+      await assertOwned(s, { roleId: body.roleId, taskId: body.taskId });
+      const mine = and(eq(blocks.id, id), eq(blocks.userId, s.userId));
+      const [current] = await s.db.select().from(blocks).where(mine).limit(1);
       if (!current) return c.json({ error: "Block not found" }, 404);
       const start = body.startMin ?? current.startMin;
       const end = body.endMin ?? current.endMin;
       if (end <= start) return c.json({ error: "A block must end after it starts." }, 400);
-      const row = ctx.db.update(blocks).set(body).where(eq(blocks.id, id)).returning().get();
-      const task = row.taskId ? getTask(ctx.db, row.taskId) : undefined;
-      return c.json(toBlockDTO(row, task ? toTaskDTO(task, triageContext(ctx.db)) : undefined));
+      const [row] = await s.db.update(blocks).set(body).where(mine).returning();
+      const task = row.taskId ? await getTask(s, row.taskId) : undefined;
+      return c.json(toBlockDTO(row, task ? toTaskDTO(task, await triageContext(s)) : undefined));
     })
-    .delete("/blocks/:id", v("param", idParam), (c) => {
-      ctx.db.delete(blocks).where(eq(blocks.id, c.req.valid("param").id)).run();
+    .delete("/blocks/:id", v("param", idParam), async (c) => {
+      const s = c.var.scope;
+      await s.db.delete(blocks).where(and(eq(blocks.id, c.req.valid("param").id), eq(blocks.userId, s.userId)));
       return c.json({ ok: true });
     })
 
     /* ---------------- Today ---------------- */
-    .get("/today", v("query", z.object({ date: isoDate.optional() })), (c) => {
-      const date = c.req.valid("query").date ?? todayISO();
-      if (!isValidISODate(date)) return c.json({ error: "Invalid date" }, 400);
-      return c.json(getToday(ctx.db, date));
+    .get("/today", v("query", z.object({ date: isoDate.optional() })), async (c) => {
+      const s = c.var.scope;
+      return c.json(await getToday(s, c.req.valid("query").date ?? s.today));
     })
-    .get("/day/:date/tasks", v("param", z.object({ date: isoDate })), (c) => {
-      const tctx = triageContext(ctx.db);
-      const rows = ctx.db.select().from(tasks).where(eq(tasks.scheduledDate, c.req.valid("param").date)).all();
+    .get("/day/:date/tasks", v("param", z.object({ date: isoDate })), async (c) => {
+      const s = c.var.scope;
+      const tctx = await triageContext(s);
+      const rows = await s.db
+        .select()
+        .from(tasks)
+        .where(and(eq(tasks.userId, s.userId), eq(tasks.scheduledDate, c.req.valid("param").date)));
       return c.json(rows.sort(byPriority).map((r) => toTaskDTO(r, tctx)));
     });

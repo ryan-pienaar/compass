@@ -1,66 +1,64 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
 import { DEV_API_PORT, PROD_PORT } from "../shared/constants.ts";
 import { createApp } from "./app.ts";
-import { createDb, dailyBackup } from "./db/client.ts";
-import { DIST_DIR, defaultDbPath } from "./paths.ts";
+import { authenticatorFromEnv } from "./auth.ts";
+import { connectPostgres } from "./db/client.ts";
+import { DIST_DIR, LOCAL_DB_DIR } from "./paths.ts";
 
+/*
+ * Runs the API on Node: `pnpm dev` (with Vite in front) or `pnpm start` (serving the
+ * built UI too). On Vercel the same app runs as a function (api/index.ts) instead.
+ *  - Database: DATABASE_URL (Supabase) when set, otherwise a local PGlite folder.
+ *  - Auth: Auth0 when AUTH0_DOMAIN/AUTH0_AUDIENCE are set, otherwise (dev only) a local user.
+ */
 const { values } = parseArgs({
   options: {
     dev: { type: "boolean", default: false },
     port: { type: "string" },
-    db: { type: "string" },
-    open: { type: "boolean", default: false },
   },
 });
 
 const dev = values.dev ?? false;
 // In dev, PORT (often set by tooling for the Vite server) must not be picked up by the API.
 const port = Number(values.port ?? (dev ? DEV_API_PORT : (process.env.PORT ?? PROD_PORT)));
-const dbPath = values.db ?? process.env.COMPASS_DB ?? defaultDbPath(dev);
 
 if (!dev && !existsSync(join(DIST_DIR, "index.html"))) {
   console.error("The UI hasn't been built yet. Run `pnpm build` first (or use `pnpm dev`).");
   process.exit(1);
 }
 
-const { db, client, isNew } = createDb(dbPath);
-// Nothing to protect in a brand-new database; afterwards, one backup per day.
-const backup = isNew ? null : dailyBackup(client, dbPath);
-const app = createApp({ db, client, dbPath, dev }, { serveStatic: !dev });
+const url = process.env.DATABASE_URL;
+if (!url) mkdirSync(LOCAL_DB_DIR, { recursive: true });
+// PGlite is a development dependency: load it only when there is no DATABASE_URL.
+const database = url
+  ? connectPostgres(url, { ca: process.env.DATABASE_CA_CERT })
+  : await (await import("./db/pglite.ts")).openPglite(LOCAL_DB_DIR);
+const authenticate = authenticatorFromEnv(process.env, { allowLocal: dev });
 
-const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
-  const url = `http://127.0.0.1:${info.port}`;
-  console.log(dev ? `Compass API (dev) listening on ${url}` : `Compass is running at ${url}`);
-  console.log(`Database: ${dbPath}`);
-  if (backup) console.log(`Daily backup: ${backup}`);
-  if (values.open) openBrowser(url);
-});
-
-function openBrowser(url: string) {
-  const [cmd, args] =
-    process.platform === "win32"
-      ? ["cmd", ["/c", "start", "", url]]
-      : process.platform === "darwin"
-        ? ["open", [url]]
-        : ["xdg-open", [url]];
-  try {
-    spawn(cmd, args as string[], { detached: true, stdio: "ignore" }).unref();
-  } catch {
-    // Opening a browser is a convenience; the URL is printed above.
-  }
+const app = createApp({ db: database.db, authenticate, dev });
+if (!dev) {
+  // serveStatic resolves paths relative to the working directory.
+  const root = relative(process.cwd(), DIST_DIR) || ".";
+  app.use("/assets/*", serveStatic({ root }));
+  app.use("/*", serveStatic({ root }));
+  // Single-page app: any other route renders index.html.
+  app.get("*", serveStatic({ root, path: "index.html" }));
 }
 
-function shutdown() {
+const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
+  const where = `http://127.0.0.1:${info.port}`;
+  console.log(dev ? `Compass API (dev) listening on ${where}` : `Compass is running at ${where}`);
+  console.log(`Database: ${url ? "DATABASE_URL (Postgres)" : LOCAL_DB_DIR}`);
+  console.log(`Auth: ${process.env.AUTH0_DOMAIN ? `Auth0 (${process.env.AUTH0_DOMAIN})` : "local user (no Auth0 configured)"}`);
+});
+
+async function shutdown() {
   server.close();
-  try {
-    client.close();
-  } catch {
-    // already closed
-  }
+  await database.close().catch(() => {});
   process.exit(0);
 }
 process.on("SIGINT", shutdown);

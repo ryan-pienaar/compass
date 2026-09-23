@@ -55,6 +55,7 @@ function JournalPage() {
     .filter((w) => w.status === "reviewed")
     .map((w) => ({
       id: `week-${w.weekStart}`,
+      userId: "",
       date: w.reviewedAt ? localDateOf(w.reviewedAt) : w.weekStart,
       kind: "weekly",
       title: `Week of ${formatWeekRange(w.weekStart)}`,

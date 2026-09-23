@@ -1,30 +1,50 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../server/app.ts";
-import { createDb } from "../server/db/client.ts";
-import { addDaysISO, addWeeksISO, todayISO, weekStartFor } from "../shared/dates.ts";
+import type { Authenticate } from "../server/context.ts";
+import { openPglite } from "../server/db/pglite.ts";
+import { addDaysISO, addWeeksISO, todayISO, todayInZone, weekStartFor } from "../shared/dates.ts";
 
 type Json = Record<string, any>;
 
-function setup() {
-  const { db, client } = createDb(":memory:");
-  const app = createApp({ db, client, dbPath: ":memory:", dev: true }, { serveStatic: false });
-  const call = async (method: string, path: string, body?: unknown): Promise<Json> => {
-    const res = await app.request(`/api${path}`, {
+/** The test machine's zone, so the server's "today" matches todayISO() here. */
+const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+async function setup() {
+  const database = await openPglite();
+  // Tests act as whoever `x-test-user` names (Alice by default); "anonymous" has no credential.
+  const authenticate: Authenticate = async (req) => {
+    const user = req.headers.get("x-test-user") ?? "auth0|alice";
+    return user === "anonymous" ? null : { userId: user };
+  };
+  const app = createApp({ db: database.db, authenticate, dev: true });
+  const request = (method: string, path: string, body?: unknown, as?: string, zone = ZONE) =>
+    app.request(`/api${path}`, {
       method,
-      headers: body ? { "content-type": "application/json" } : undefined,
+      headers: {
+        "x-timezone": zone,
+        ...(body ? { "content-type": "application/json" } : {}),
+        ...(as ? { "x-test-user": as } : {}),
+      },
       body: body ? JSON.stringify(body) : undefined,
     });
+  const call = async (method: string, path: string, body?: unknown, as?: string): Promise<Json> => {
+    const res = await request(method, path, body, as);
     const json = (await res.json()) as Json;
     if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}: ${JSON.stringify(json)}`);
     return json;
   };
-  return { app, call };
+  return { request, call, close: database.close };
 }
 
 describe("API", () => {
-  let call: ReturnType<typeof setup>["call"];
-  beforeEach(() => {
-    call = setup().call;
+  let call: Awaited<ReturnType<typeof setup>>["call"];
+  let request: Awaited<ReturnType<typeof setup>>["request"];
+  let close: () => Promise<void>;
+  beforeEach(async () => {
+    ({ call, request, close } = await setup());
+  });
+  afterEach(async () => {
+    await close();
   });
 
   async function onboard() {
@@ -185,15 +205,50 @@ describe("API", () => {
     expect(reviewed.mission.reviewedAt).not.toBeNull();
   });
 
-  it("exports and re-imports everything", async () => {
+  it("exports and re-imports everything, into the same account or another one", async () => {
     await onboard();
-    await call("POST", "/tasks", { title: "A task", important: true, urgent: false });
+    const roles = (await call("GET", "/roles")) as unknown as Json[];
+    const task = await call("POST", "/tasks", { title: "A task", important: true, roleId: roles[0].id });
     const exported = await call("GET", "/data/export");
     expect(exported.format).toBe("compass-export");
-    const fresh = setup().call;
-    const res = await fresh("POST", "/data/import", { confirm: "REPLACE", data: exported });
+    expect(exported.tables.tasks[0].userId).toBeUndefined();
+
+    // Into another account: fresh ids, references rewritten, the original untouched.
+    const res = await call("POST", "/data/import", { confirm: "REPLACE", data: exported }, "auth0|bob");
     expect(res.counts.roles).toBe(3);
     expect(res.counts.tasks).toBe(1);
+    const bobTasks = (await call("GET", "/tasks?view=all", undefined, "auth0|bob")) as unknown as Json[];
+    const bobRoles = (await call("GET", "/roles", undefined, "auth0|bob")) as unknown as Json[];
+    expect(bobTasks[0].id).not.toBe(task.id);
+    expect(bobTasks[0].roleId).toBe(bobRoles[0].id);
+    expect(((await call("GET", "/tasks?view=all")) as unknown as Json[]).map((t) => t.id)).toEqual([task.id]);
+
+    // Into the same account again: replaces rather than duplicates.
+    const again = await call("POST", "/data/import", { confirm: "REPLACE", data: exported });
+    expect(again.counts.tasks).toBe(1);
+  });
+
+  it("keeps each person's data private", async () => {
+    await onboard();
+    const aliceRoles = (await call("GET", "/roles")) as unknown as Json[];
+    const task = await call("POST", "/tasks", { title: "Alice's plan", roleId: aliceRoles[0].id });
+
+    const bob = "auth0|bob";
+    expect(await call("GET", "/roles", undefined, bob)).toEqual([]);
+    expect(await call("GET", "/tasks?view=all", undefined, bob)).toEqual([]);
+    expect((await request("GET", `/tasks/${task.id}`, undefined, bob)).status).toBe(404);
+    expect((await request("PATCH", `/tasks/${task.id}`, { title: "Mine now" }, bob)).status).toBe(404);
+    await call("DELETE", `/tasks/${task.id}`, undefined, bob);
+    // Bob can't point his own task at Alice's role either.
+    expect((await request("POST", "/tasks", { title: "Sneaky", roleId: aliceRoles[0].id }, bob)).status).toBe(400);
+
+    expect(((await call("GET", "/tasks?view=all")) as unknown as Json[]).map((t) => t.title)).toEqual(["Alice's plan"]);
+  });
+
+  it("requires a signed-in user and uses their time zone for today", async () => {
+    expect((await request("GET", "/bootstrap", undefined, "anonymous")).status).toBe(401);
+    const far = await request("GET", "/bootstrap", undefined, undefined, "Pacific/Kiritimati");
+    expect(((await far.json()) as Json).today).toBe(todayInZone("Pacific/Kiritimati"));
   });
 
   it("seeds demo data in dev mode", async () => {

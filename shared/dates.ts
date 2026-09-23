@@ -1,3 +1,4 @@
+import { TZDate } from "@date-fns/tz";
 import { addDays, differenceInCalendarDays, format, parseISO, startOfWeek } from "date-fns";
 
 /** 0 = Sunday ... 6 = Saturday (same convention as Date#getDay and date-fns). */
@@ -16,11 +17,36 @@ export const todayISO = (): ISODate => toISODate(new Date());
 /** The local calendar date of a stored timestamp (timestamps are stored as UTC ISO strings). */
 export const localDateOf = (timestamp: string): ISODate => toISODate(new Date(timestamp));
 
-/** Local midnight at the start of `date` as a stored-format timestamp, for range queries. */
-export const startOfDayTimestamp = (date: ISODate): string => fromISODate(date).toISOString();
+/*
+ * Time-zone aware versions for the server, which runs in UTC while each user lives in their
+ * own zone. The browser sends its IANA zone with every request.
+ */
 
-/** Local date and time for file names, e.g. 2026-09-23T21-05-00. */
-export const fileStamp = (d: Date = new Date()): string => format(d, "yyyy-MM-dd'T'HH-mm-ss");
+/** Whether this runtime knows an IANA time zone name. */
+export function isValidTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The calendar date of an instant in a time zone. */
+export const dateInZone = (instant: Date | string | number, timeZone: string): ISODate =>
+  toISODate(new TZDate(new Date(instant).getTime(), timeZone));
+
+/** Today's date in a time zone. */
+export const todayInZone = (timeZone: string): ISODate => dateInZone(Date.now(), timeZone);
+
+/** Today's day of the week in a time zone (0 = Sunday). */
+export const weekdayInZone = (timeZone: string): number => new TZDate(Date.now(), timeZone).getDay();
+
+/** Midnight at the start of `date` in a time zone, as a UTC ISO timestamp for range queries. */
+export function startOfDayInZone(date: ISODate, timeZone: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(new TZDate(y, m - 1, d, timeZone).getTime()).toISOString();
+}
 
 export function weekStartFor(date: Date | ISODate, weekStartsOn: WeekStartsOn): ISODate {
   const d = typeof date === "string" ? fromISODate(date) : date;

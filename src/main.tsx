@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@/components/theme";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { AuthProvider } from "@/lib/auth";
 import { routeTree } from "./routeTree.gen";
 
 const queryClient = new QueryClient({
@@ -33,7 +34,9 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider delay={300}>
-          <RouterProvider router={router} />
+          <AuthProvider onRedirect={(returnTo) => router.history.replace(returnTo)}>
+            <RouterProvider router={router} />
+          </AuthProvider>
           <Toaster position="bottom-right" closeButton />
         </TooltipProvider>
       </QueryClientProvider>

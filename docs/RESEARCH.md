@@ -35,7 +35,33 @@ Condensed from the research done before building Compass (September 2026).
 - Making a plan for an unfinished goal relieves the intrusive thoughts about it ([Masicampo & Baumeister](https://users.wfu.edu/masicaej/MasicampoBaumeister2011JPSP.pdf)): hence decide, don't drift.
 - The start of a week works as a "fresh start" point ([Dai et al.](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=2204126)).
 
-## Stack verification (practical tests on this machine)
+## Hosted stack verification (September 2026)
+
+Checked against current docs, in scratch projects, and with an offline `vercel build` of this repository:
+
+- **Drizzle 1.0.0-rc.4 on Postgres**: `drizzle-orm/postgres-js`, `/node-postgres` and `/pglite`. Each has its own migrator; a transaction extends `PgAsyncDatabase`, so one `DB` type fits all of them.
+  - `pgTable.withRLS()` enables row-level security; `.enableRLS()` is deprecated.
+  - drizzle-kit keeps the folder-per-migration layout. The migrator takes no lock, so migrations run from the command line, not at function start.
+  - In the drivers' codecs, `timestamp({ mode: "string" })` returns Postgres text (`2026-09-23 22:00:00+00`), not ISO. Compass therefore uses a `timestamptz` custom type that returns ISO strings. `date` columns return `YYYY-MM-DD`.
+- **PGlite**: 0.4.6 runs Postgres 17.5, matching hosted Supabase; 0.5.x runs Postgres 18. Only one connection is allowed, and unclosed instances keep Node alive. Compass pins 0.4.6 for development and tests. A separate scratch check drove the real API through the production driver over the wire protocol (PGlite socket server); timestamps, dates, `jsonb`, upserts, transactions and import all behaved as with PGlite.
+- **Supabase from Vercel**: the direct connection is IPv6-only, so use the shared pooler.
+  - Transaction mode on port 6543 serves the app (postgres-js with `prepare: false`).
+  - Session mode on port 5432 is for migrations.
+  - The pooler user is the `postgres` role, which bypasses RLS. With RLS on and no policies, the Data API sees nothing.
+  - Projects created after 30 May 2026 no longer expose new `public` tables by default.
+  - [Connecting](https://supabase.com/docs/guides/database/connecting-to-postgres) · [IPv4/IPv6](https://supabase.com/docs/guides/troubleshooting/supabase--your-network-ipv4-and-ipv6-compatibility-cHe3BP) · [Hardening the Data API](https://supabase.com/docs/guides/database/hardening-data-api)
+- **Hono on Vercel**: use `api/index.ts` with a rewrite of `/api/(.*)` to it.
+  - Catch-all file names such as `[...route].ts` match only one path segment outside Next.js.
+  - A default export with `.fetch` is a web handler for every method, whereas a default-exported function is treated as Node's `(req, res)`.
+  - Vercel compiles each file but leaves `.ts` import specifiers alone and reads only the root `tsconfig.json`. The root `tsconfig.json` sets `rewriteRelativeImportExtensions`; without it the function fails with `ERR_MODULE_NOT_FOUND`.
+  - Node 24.x is the default runtime (Node 25 isn't offered). Functions run in `iad1` unless `regions` is set.
+  - [Functions API](https://vercel.com/docs/functions/functions-api-reference) · [Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions) · [Regions](https://vercel.com/docs/functions/configuring-functions/region)
+- **Auth0**: `@auth0/auth0-react` 2.27 (supports React 19.2+).
+  - `useRefreshTokens` adds `offline_access`; the in-memory cache loses the session on reload, hence `cacheLocation="localstorage"`.
+  - Hono's built-in `jwk` middleware re-fetches the key set on every request and accepts tokens without `sub`. jose's `createRemoteJWKSet` caches keys, and `requiredClaims` enforces `sub` and `exp`.
+  - [React SDK examples](https://github.com/auth0/auth0-react/blob/main/EXAMPLES.md) · [Refresh token rotation](https://auth0.com/docs/secure/tokens/refresh-tokens/refresh-token-rotation)
+
+## Original stack verification (local version, practical tests on this machine)
 
 - Windows 11 x64, Node 25.9.0 (ABI 141), pnpm 9.15.9, and no Visual Studio Build Tools or Python, so node-gyp builds fail.
 - `better-sqlite3` 13.x ships a prebuilt binary, but npm/pnpm may still run node-gyp and fail. That made it a fallback, not the default.

@@ -2,13 +2,13 @@
 
 ## 1. Goal
 
-A local web app that helps one person spend more time in **Quadrant II** (important, not urgent) by implementing Habits 1–3 of *The 7 Habits of Highly Effective People* as a working system:
+A web app that helps people spend more time in **Quadrant II** (important, not urgent) by implementing Habits 1–3 of *The 7 Habits of Highly Effective People* as a working system:
 
 - a **task manager** where every item carries its urgency × importance,
 - a **weekly planner** built on Covey's Quadrant II organizing (roles → goals → scheduling → daily adapting),
 - a **focus and prioritization aid** for the moment something comes up and for each day.
 
-Constraints: local only (no backend infrastructure), SQLite for storage, a stack that is easy to extend later (desktop wrapper, sync, deployment).
+Constraints: it started local-only (one SQLite file, tagged `local-v0.1.0`). It now runs hosted in production: Supabase Postgres, Auth0 sign-in, Vercel hosting, with every person's data private to them (§2.4).
 
 ## 2. Research summary
 
@@ -59,6 +59,20 @@ Database driver: this machine has no C++ build tools, so `better-sqlite3` instal
 
 UI: shadcn/ui on Base UI (its current default) with Tailwind 4; @dnd-kit/react 0.5 (pinned) for all drag-and-drop; a custom CSS-grid week calendar (no second drag system); hand-built SVG charts following a validated, colorblind-safe palette.
 
+### 2.4 Hosted architecture (September 2026)
+
+The local SQLite version was migrated to a hosted, multi-user production setup. Decisions, verified against current docs and with an offline `vercel build` plus wire-protocol tests:
+
+| Decision | Choice and reason |
+|---|---|
+| Where the business rules run | **Keep the Hono API** (as one Vercel Function) with Supabase Postgres behind it. The alternative, browser → Supabase directly with RLS policies, would have meant rewriting the week, review, triage and import logic as SQL functions or client code. |
+| Database access | Drizzle 1.0 RC on Postgres. Production driver `postgres` (postgres-js) through Supabase's **transaction pooler** (port 6543, IPv4, `prepare: false`); migrations through the session pooler with `pnpm db:migrate`, never on a request. TLS always on; verified against Supabase's CA when `DATABASE_CA_CERT` is set. |
+| Multi-user data | `user_id` (the Auth0 `sub`) on every table; per-user unique keys; every query scoped by a per-request `Scope`; client-supplied references checked with `assertOwned`. RLS enabled on every table with **no policies**, so Supabase's Data API exposes nothing; the server's connection bypasses RLS. |
+| Sign-in | Auth0 SPA SDK (`@auth0/auth0-react` 2, refresh-token rotation); the API verifies RS256 access tokens with jose (issuer, audience, required `sub`). The router mounts only once a token is available. |
+| Dates | The server runs in UTC, so the browser sends its IANA zone (`X-Timezone`) and "today" is computed per request (`@date-fns/tz`). Timestamps are `timestamptz` exposed as ISO strings. |
+| Vercel | `api/index.ts` default-exports the Hono app (a web handler for every method); `vercel.json` rewrites `/api/*` to it and everything else to `index.html`. Vercel reads only the root `tsconfig.json`, which rewrites `.ts` import extensions. The function region should match the Supabase region. |
+| Development and tests | PGlite (Postgres 17 in-process, pinned to match Supabase): a folder for `pnpm dev`, in memory for tests. The local no-login user exists only in `--dev`; production refuses to start without Auth0 and a database URL. |
+
 ## 3. Product principles: the six criteria as acceptance tests
 
 | Criterion | What it means for Compass |
@@ -68,7 +82,7 @@ UI: shadcn/ui on Base UI (its current default) with Tailwind 4; @dnd-kit/react 0
 | **Quadrant II focus** | The week is the planning unit; big rocks are placed first; daily planning is adapting. |
 | **People dimension** | "I chose a higher value" is a first-class outcome that counts *toward* integrity; moving a plan asks why, without judgement; there is no overdue red for planned days. |
 | **Flexibility** | Almost every field is optional; week start, planning day, hours, urgency window, capacity target and language coach are configurable. |
-| **Portability** | Runs in any browser on the machine; responsive layout; one portable SQLite file plus JSON export. |
+| **Portability** | Runs in any browser on any device after signing in; responsive layout; JSON export/import of everything. |
 
 ## 4. Information architecture
 
@@ -101,7 +115,8 @@ Be proactive (1)                   Influence (concerns, 30-day test, language) �
 `settings` · `roles` · `goals` (long-term) · `missions` + `mission_versions` · `weeks` + `week_roles` · `tasks` (tasks **and** weekly rocks, `kind = task | goal`) · `blocks` (calendar) · `affirmations` · `concerns` · `delegations` + `delegation_checkins` · `journal` (reflections, choices, exercises, notes) · `time_audits` + `time_entries` · `challenges` + `challenge_days` · `assessments`.
 
 Rules:
-- Dates are local `YYYY-MM-DD`; times are minutes from midnight.
+- Every row carries `user_id` (the Auth0 subject); nothing is shared between people.
+- Dates are `YYYY-MM-DD` in the user's own time zone; times are minutes from midnight; timestamps are UTC instants.
 - Importance comes from an explicit flag, or is inferred from a role/goal link. Urgency comes from an explicit flag, or from a deadline within N days. When neither is known, the item is untriaged and sits in the inbox.
 - `created_quadrant` records the quadrant at capture, which makes "Q2 work that became urgent" visible.
 - Weekly rocks are promises: `open | done | missed | dropped` + reason. Integrity = (done + chose a higher value) ÷ decided.
@@ -117,11 +132,12 @@ Rules:
 7. Influence (concerns, 30-day test, language); Stewardships; Journal.
 8. Insights (charts, time audit, urgency check); Settings (export/import/backup).
 9. Verification in the browser, production build, docs.
+10. Hosted production setup: Supabase Postgres, Auth0, Vercel; per-user data; tests for isolation between users (§2.4, [DEPLOY.md](DEPLOY.md)).
 
 ## 8. Ideas for later
 
 - `.ics` export of the week; read-only calendar import to evaluate existing appointments during planning.
 - Recurring rock templates (suggest, never auto-add).
 - Estimate calibration (planned vs actual minutes from focus sessions).
-- Desktop wrapper (Tauri or Electron) running the same Node server as a sidecar; optional sync.
-- Family or team mission statements.
+- Family or team mission statements (the data model is already per-person; sharing would add explicit memberships).
+- Delete-my-account (remove every row for a user) and scheduled exports.

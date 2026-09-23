@@ -139,6 +139,7 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
     const task = data.task;
     const temp: Block = {
       id: `temp-${Date.now()}`,
+      userId: board.week.userId,
       date: slot.date,
       startMin: slot.startMin,
       endMin: slot.endMin,
