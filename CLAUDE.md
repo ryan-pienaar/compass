@@ -17,6 +17,7 @@ Compass is a hosted, multi-user planner (Habits 1–3 of *The 7 Habits*): a Vite
 - The local-user shortcut exists only for `server/index.ts --dev`. `api/index.ts` passes `allowLocal: false` and must keep refusing to start without `DATABASE_URL` and Auth0 settings. Sample data is dev-only (403 otherwise).
 - RLS is enabled on every table (`pgTable.withRLS`) with no policies, so Supabase's Data API exposes nothing. The server's connection bypasses RLS, so the `userId` filters are the real protection.
 - 500 responses carry a generic message; details go to the function log only.
+- **Never commit secrets.** Credentials go in `.env.local` (git-ignored) or Vercel's environment settings; `.env.example` holds names only. `.gitignore` also covers keys/certificates, Vercel and Supabase CLI state, databases, dumps and `compass-export-*.json` (personal data). `.mcp.json` is tracked, so any token an MCP server needs must be referenced as `${ENV_VAR}`, never written into it.
 
 ## Versions and APIs that differ from older examples
 

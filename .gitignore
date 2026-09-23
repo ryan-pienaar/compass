@@ -1,4 +1,4 @@
-# Logs
+# Logs (can contain request data or tokens)
 logs
 *.log
 npm-debug.log*
@@ -23,17 +23,45 @@ dist-ssr
 *.sln
 *.sw?
 
-# Local data (dev database lives here; the real database lives in %LOCALAPPDATA%\Compass)
+# ---------------------------------------------------------------------------
+# Secrets. Credentials live in .env.local (development) and in Vercel's
+# environment settings (production); only the empty template is tracked.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+# Keys and certificates: TLS keys, signing keys, the Supabase CA download
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+*.jks
+*.keystore
+# Tool credentials that can end up in the project folder
+.npmrc
+.netrc
+.vercel
+supabase/.temp/
+supabase/.branches/
+# Local agent settings (may hold approvals or tokens)
+.claude/settings.local.json
+
+# ---------------------------------------------------------------------------
+# Personal data: plans, journal entries and reflections
+# ---------------------------------------------------------------------------
+# Local development database (PGlite) and anything else under data/
 data/
 *.db
 *.db-wal
 *.db-shm
-.claude/settings.local.json
-
-# Secrets and local environment (commit .env.example only)
-.env
-.env.*
-!.env.example
-
-# Vercel
-.vercel
+*.sqlite
+*.sqlite3
+# Database dumps and backups
+*.dump
+*.bak
+backups/
+# Downloads from Settings → Your data → Export
+compass-export-*.json
