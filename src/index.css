@@ -1,0 +1,195 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/newsreader";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-heading: var(--font-sans);
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Newsreader Variable", Georgia, "Times New Roman", serif;
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  /* Time management matrix */
+  --color-q1: var(--q1);
+  --color-q2: var(--q2);
+  --color-q3: var(--q3);
+  --color-q4: var(--q4);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-viz-series-1: var(--viz-series-1);
+  --color-viz-grid: var(--viz-grid);
+  --color-viz-axis: var(--viz-axis);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/* Warm paper + ink, with teal for Quadrant II (the work that matters but never shouts). */
+:root {
+  --background: oklch(0.984 0.004 85);
+  --foreground: oklch(0.21 0.012 65);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.012 65);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.012 65);
+  --primary: oklch(0.51 0.086 186);
+  --primary-foreground: oklch(0.985 0.005 186);
+  --secondary: oklch(0.955 0.006 85);
+  --secondary-foreground: oklch(0.25 0.012 65);
+  --muted: oklch(0.955 0.006 85);
+  --muted-foreground: oklch(0.51 0.012 65);
+  --accent: oklch(0.95 0.02 186);
+  --accent-foreground: oklch(0.3 0.06 186);
+  --destructive: oklch(0.577 0.215 27);
+  --border: oklch(0.905 0.008 80);
+  --input: oklch(0.89 0.008 80);
+  --ring: oklch(0.6 0.08 186);
+  /* Quadrant colors: a validated categorical set (CVD-safe in Q1→Q4 order, both modes).
+     Used for marks and fills only; text stays in ink. */
+  --q1: #eb6834;
+  --q2: #1baf7a;
+  --q3: #eda100;
+  --q4: #4a3aa7;
+  /* Status (text-safe steps) */
+  --success: oklch(0.5 0.12 150);
+  --warning: oklch(0.55 0.13 65);
+  /* Charts */
+  --viz-series-1: #2a78d6;
+  --viz-seq-1: #cde2fb;
+  --viz-seq-2: #9ec5f4;
+  --viz-seq-3: #6da7ec;
+  --viz-seq-4: #3987e5;
+  --viz-seq-5: #256abf;
+  --viz-seq-6: #184f95;
+  --viz-grid: #e8e6e0;
+  --viz-axis: #c3c2b7;
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #4a3aa7;
+  --radius: 0.625rem;
+  --sidebar: oklch(0.967 0.006 85);
+  --sidebar-foreground: oklch(0.25 0.012 65);
+  --sidebar-primary: oklch(0.51 0.086 186);
+  --sidebar-primary-foreground: oklch(0.985 0.005 186);
+  --sidebar-accent: oklch(0.925 0.012 85);
+  --sidebar-accent-foreground: oklch(0.2 0.012 65);
+  --sidebar-border: oklch(0.905 0.008 80);
+  --sidebar-ring: oklch(0.6 0.08 186);
+}
+
+.dark {
+  --background: oklch(0.175 0.006 70);
+  --foreground: oklch(0.93 0.006 80);
+  --card: oklch(0.21 0.006 70);
+  --card-foreground: oklch(0.93 0.006 80);
+  --popover: oklch(0.225 0.006 70);
+  --popover-foreground: oklch(0.93 0.006 80);
+  --primary: oklch(0.76 0.12 182);
+  --primary-foreground: oklch(0.2 0.03 186);
+  --secondary: oklch(0.26 0.006 70);
+  --secondary-foreground: oklch(0.93 0.006 80);
+  --muted: oklch(0.255 0.006 70);
+  --muted-foreground: oklch(0.7 0.01 70);
+  --accent: oklch(0.3 0.04 186);
+  --accent-foreground: oklch(0.92 0.03 186);
+  --destructive: oklch(0.68 0.19 24);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.6 0.09 186);
+  --q1: #d95926;
+  --q2: #199e70;
+  --q3: #c98500;
+  --q4: #9085e9;
+  --success: oklch(0.72 0.14 150);
+  --warning: oklch(0.8 0.14 75);
+  --viz-series-1: #3987e5;
+  --viz-seq-1: #0d366b;
+  --viz-seq-2: #104281;
+  --viz-seq-3: #1c5cab;
+  --viz-seq-4: #2a78d6;
+  --viz-seq-5: #5598e7;
+  --viz-seq-6: #86b6ef;
+  --viz-grid: #2c2c2a;
+  --viz-axis: #383835;
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #9085e9;
+  --sidebar: oklch(0.195 0.006 70);
+  --sidebar-foreground: oklch(0.93 0.006 80);
+  --sidebar-primary: oklch(0.76 0.12 182);
+  --sidebar-primary-foreground: oklch(0.2 0.03 186);
+  --sidebar-accent: oklch(0.26 0.006 70);
+  --sidebar-accent-foreground: oklch(0.95 0.006 80);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.6 0.09 186);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 25%, transparent);
+  }
+}
+
+@layer components {
+  /* Serif voice for "leadership" content: mission, affirmations, reflections. */
+  .compass-text {
+    @apply font-serif text-[1.075rem] leading-relaxed;
+    font-variation-settings: "opsz" 18;
+  }
+  .compass-display {
+    @apply font-serif tracking-tight;
+    font-variation-settings: "opsz" 48;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+}
