@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect } from "@tanstack/react-router";
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardCheck } from "lucide-react";
+import { CalendarCheck, Check, ChevronLeft, ChevronRight, ClipboardCheck } from "lucide-react";
 import { useEffect, useState } from "react";
 import { addDaysISO, addWeeksISO, isValidISODate, weekStartFor } from "@shared/dates.ts";
-import { Page } from "@/components/page";
-import { Badge } from "@/components/ui/badge";
+import { Chip } from "@/components/chip";
+import { IconButton } from "@/components/icon-button";
+import { Page, PageHeader } from "@/components/page";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { WeekPlanner } from "@/components/week/week-planner";
@@ -25,6 +26,16 @@ export const Route = createFileRoute("/_app/week/$start")({
   component: WeekPage,
 });
 
+/**
+ * At `lg` the planner fills the rest of the viewport. Measured chrome (22.875rem): top bar 3rem,
+ * page top 1.5rem, header 4.625rem + 1rem, weekly focus 2rem + 1rem, stats 7.25rem + 1rem,
+ * page bottom 1.5rem. The 34rem floor keeps about six hours of the grid in view under its sticky
+ * day header, so on a laptop screen the page scrolls a little rather than squeezing the week.
+ */
+const PLANNER_HEIGHT = "max(calc(100svh - 22.875rem), 34rem)";
+/** Below `lg` the tray stacks above the grid and the page scrolls anyway, so the grid takes nearly a full screen. */
+const STACKED_GRID_HEIGHT = "calc(100svh - 7rem)";
+
 function WeekPage() {
   const { start } = Route.useParams();
   const { today, weekStart } = useBootstrap();
@@ -34,47 +45,86 @@ function WeekPage() {
   const reviewable = status === "planned" && today >= addDaysISO(lastDay, -1);
 
   return (
-    <Page width="full" className="pt-2 pb-6">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon-sm" aria-label="Previous week" render={<Link to="/week/$start" params={{ start: addWeeksISO(start, -1) }} />}>
-            <ChevronLeft />
-          </Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Next week" render={<Link to="/week/$start" params={{ start: addWeeksISO(start, 1) }} />}>
-            <ChevronRight />
-          </Button>
-        </div>
-        <h1 className="text-xl font-semibold tracking-tight">{formatWeekRange(start)}</h1>
-        {start !== weekStart && (
-          <Button variant="outline" size="xs" render={<Link to="/week/$start" params={{ start: weekStart }} />}>
-            This week
-          </Button>
-        )}
-        <Badge variant={status === "draft" ? "outline" : "secondary"} className="ml-1">
-          {status === "draft" ? "Not planned yet" : status === "planned" ? "Planned" : "Reviewed"}
-        </Badge>
-        <div className="ml-auto flex items-center gap-2">
-          {status === "draft" && (
-            <Button size="sm" render={<Link to="/plan/$start" params={{ start }} />}>
-              <CalendarCheck /> Plan this week
-            </Button>
-          )}
-          {reviewable && (
-            <Button size="sm" variant="outline" render={<Link to="/plan/$start" params={{ start: addWeeksISO(start, 1) }} search={{ step: "review" }} />}>
-              <ClipboardCheck /> Review & plan next week
-            </Button>
-          )}
-          {status !== "draft" && (
-            <Button size="sm" variant="ghost" render={<Link to="/plan/$start" params={{ start }} search={{ step: "goals" }} />}>
-              Replan
-            </Button>
-          )}
-        </div>
-      </div>
+    <Page width="full" className="pt-4 pb-6 sm:pt-6">
+      <PageHeader
+        className="mb-4"
+        eyebrow={
+          <>
+            <IconButton
+              label="Previous week"
+              icon={<ChevronLeft />}
+              className="-ml-2"
+              render={<Link to="/week/$start" params={{ start: addWeeksISO(start, -1) }} />}
+            />
+            <IconButton label="Next week" icon={<ChevronRight />} render={<Link to="/week/$start" params={{ start: addWeeksISO(start, 1) }} />} />
+            {start !== weekStart && (
+              <Button
+                variant="link"
+                size="inline"
+                // A 44px-tall hit area on touch, level with the chevrons; the sides stop short of them.
+                className="ml-1.5 pointer-coarse:after:absolute pointer-coarse:after:-inset-x-1.5 pointer-coarse:after:-inset-y-3"
+                render={<Link to="/week/$start" params={{ start: weekStart }} />}
+              >
+                This week
+              </Button>
+            )}
+          </>
+        }
+        title={
+          <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="tabular-nums">{formatWeekRange(start)}</span>
+            <WeekStatusBadge status={status} />
+          </span>
+        }
+        actions={
+          <>
+            {status === "draft" && (
+              <Button size="sm" render={<Link to="/plan/$start" params={{ start }} />}>
+                <CalendarCheck /> Plan this week
+              </Button>
+            )}
+            {reviewable && (
+              <Button size="sm" variant="outline" render={<Link to="/plan/$start" params={{ start: addWeeksISO(start, 1) }} search={{ step: "review" }} />}>
+                <ClipboardCheck /> Review & plan next week
+              </Button>
+            )}
+            {status !== "draft" && (
+              <Button size="sm" variant="ghost" render={<Link to="/plan/$start" params={{ start }} search={{ step: "goals" }} />}>
+                Replan
+              </Button>
+            )}
+          </>
+        }
+      />
       {board && <Intention start={start} value={board.week.intention} />}
-      {board && <WeekStats board={board} className="mb-3" />}
-      <WeekPlanner start={start} height="calc(100svh - 15.5rem)" />
+      {board && <WeekStats board={board} className="mb-4" />}
+      <WeekPlanner start={start} height={PLANNER_HEIGHT} stackedHeight={STACKED_GRID_HEIGHT} />
     </Page>
+  );
+}
+
+/** Draft: an outline chip with a hollow dot. Planned: a teal dot. Reviewed: a check. Set in Geist beside the serif title. */
+function WeekStatusBadge({ status }: { status: string }) {
+  if (status === "draft") {
+    return (
+      <Chip tone="outline" className="font-sans">
+        <span aria-hidden className="size-2 shrink-0 rounded-full ring-1 ring-control ring-inset" />
+        Not planned yet
+      </Chip>
+    );
+  }
+  if (status === "planned") {
+    return (
+      <Chip tone="neutral" className="font-sans">
+        <span aria-hidden className="size-2 shrink-0 rounded-full bg-primary ring-1 ring-dot-ring" />
+        Planned
+      </Chip>
+    );
+  }
+  return (
+    <Chip tone="neutral" className="font-sans" icon={<Check aria-hidden />}>
+      Reviewed
+    </Chip>
   );
 }
 
@@ -84,12 +134,16 @@ function Intention({ start, value }: { start: string; value: string }) {
   const save = useApiMutation((intention: string) => call(api.weeks[":start"].$patch({ param: { start }, json: { intention } })));
   return (
     <Input
+      variant="ghost"
+      voice="md"
       value={text}
       onChange={(e) => setText(e.target.value)}
       onBlur={() => text !== value && save.mutate(text)}
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
       placeholder="Intention for this week: what would make it a good week?"
-      className="compass-text mb-3 h-9 border-dashed bg-transparent italic shadow-none dark:bg-transparent"
+      // One voice step smaller on phones, so a typical intention fits the line; a longer one (or the
+      // placeholder) ends in an ellipsis rather than a clipped letter while the field is at rest.
+      className="mb-4 text-ellipsis italic max-sm:voice-sm"
       aria-label="Intention for the week"
     />
   );

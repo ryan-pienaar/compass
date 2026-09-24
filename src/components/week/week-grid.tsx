@@ -1,15 +1,21 @@
 import { useDraggable, useDroppable } from "@dnd-kit/react";
 import { pointerIntersection } from "@dnd-kit/collision";
-import { Check, Mountain } from "lucide-react";
+import { ListChecks, Mountain } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { fromISODate } from "@shared/dates.ts";
 import type { Block, Role, Task } from "@/lib/api";
-import { formatDuration, formatMinutes, fmtDate } from "@/lib/format";
+import { formatMinutes, fmtDate } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { cardSensors } from "@/lib/dnd";
 import { cn } from "@/lib/utils";
 import { RoleDot } from "@/components/badges";
-import { HOUR_PX, layoutLanes, minuteToY, PX_PER_MIN, SNAP_MIN } from "./layout";
+import { DoneCheck } from "@/components/done-check";
+import { EventTime, EventTitle, eventBlockVariants, tierFor, type EventTier } from "@/components/event-block";
+import { MetaSep } from "@/components/row";
+import { boardCard, dragSource, dropZone, type DropState } from "@/components/surface";
+import { Card } from "@/components/ui/card";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { blockHeight, HOUR_PX, layoutLanes, minuteToY, PX_PER_MIN, SNAP_MIN } from "./layout";
 
 export type DragData =
   | { kind: "goal"; task: Task }
@@ -44,12 +50,45 @@ interface WeekGridProps {
   className?: string;
 }
 
+/**
+ * One column template for the header and the body: a 3.5rem hour gutter and seven day columns that
+ * never shrink below a readable width. Narrower than that, the grid scrolls sideways inside its card
+ * (snapping to a day on phones) and the page itself never does.
+ */
+const WEEK_COLS =
+  "grid-cols-(--week-cols) [--week-cols:3.5rem_repeat(7,minmax(7.5rem,1fr))] md:[--week-cols:3.5rem_repeat(7,minmax(5.25rem,1fr))]";
+/**
+ * The same minimum as a width (3.5rem + 7 × 7.5rem, or 3.5rem + 7 × 5.25rem from `md`, which keeps all
+ * seven days in view at 1280px with the sidebar and tray open). The grid box itself must be this
+ * wide, not just its tracks: sticky cells (the hour gutter) can't travel past the edge of their grid
+ * container.
+ */
+const WEEK_MIN_W = "min-w-[56rem] md:min-w-[40.25rem]";
+
+/** Today's column wash: the one tint on the grid, tying today to the now pill in the gutter. */
+const TODAY_WASH = "bg-[color-mix(in_oklab,var(--primary)_4%,transparent)]";
+
+/** Vertical padding per block tier (DESIGN.md §6.2 event-block). */
+const TIER_PAD: Record<EventTier, string> = { xs: "py-0", sm: "py-0.5", md: "py-1" };
+
+/** Neutral bar and tint for a block without a role (teal is never a category colour). */
+const roleVar = (role: Role | undefined) => ({ "--role": role?.color ?? "var(--muted-foreground)" }) as CSSProperties;
+
 export function WeekGrid(props: WeekGridProps) {
   const { days, today, dayStartHour, dayEndHour } = props;
   const dayStartMin = dayStartHour * 60;
   const dayEndMin = dayEndHour * 60;
   const hours = Array.from({ length: dayEndHour - dayStartHour }, (_, i) => dayStartHour + i);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const now = useNow(60_000);
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const showNow = days.includes(today) && nowMin >= dayStartMin && nowMin <= dayEndMin;
+  const nowY = minuteToY(nowMin, dayStartMin);
+  const hover = props.hover;
+  const hoverY = hover ? minuteToY(hover.startMin, dayStartMin) : 0;
+  const pillYs = [...(showNow ? [nowY] : []), ...(hover ? [hoverY] : [])];
+  // Priority lanes take rocks and day items; they show where to drop only while one is in the air.
+  const laneDrag = !!props.draggingId && (props.draggingId.startsWith("goal:") || props.draggingId.startsWith("dayitem:"));
 
   // Start at a useful hour: an hour before now during the day (this week), otherwise the
   // earliest block of the week (or 07:00), so evening planning shows the whole day.
@@ -66,75 +105,118 @@ export function WeekGrid(props: WeekGridProps) {
   }, [days[0]]);
 
   return (
-    <div
-      ref={scrollRef}
-      className={cn("relative overflow-auto rounded-xl border bg-card scrollbar-thin", props.className)}
-    >
-      <div className="grid min-w-[760px]" style={{ gridTemplateColumns: "3.25rem repeat(7, minmax(0, 1fr))" }}>
-        {/* Sticky header: day names + priorities lane */}
-        <div className="sticky top-0 z-20 col-span-8 grid border-b bg-card/95 backdrop-blur" style={{ gridTemplateColumns: "3.25rem repeat(7, minmax(0, 1fr))" }}>
-          <div className="flex items-end justify-center pb-1 text-[10px] text-muted-foreground" />
-          {days.map((d) => (
-            <DayHeader key={d} date={d} isToday={d === today} />
-          ))}
-          <div className="flex items-start justify-center border-t pt-2 text-[10px] font-medium text-muted-foreground uppercase [writing-mode:vertical-rl] rotate-180">
-            Priorities
+    <Card variant="flush" className={cn("min-w-0", props.className)}>
+      <div
+        ref={scrollRef}
+        className={cn(
+          "isolate min-h-0 flex-1 overflow-auto overscroll-x-contain scroll-pl-14 scrollbar-thin",
+          // Phones snap to a day; never mid-drag, where snapping would fight the auto-scroll.
+          !props.draggingId && "max-md:snap-x max-md:snap-mandatory",
+        )}
+      >
+        <div className={cn("grid", WEEK_COLS, WEEK_MIN_W)}>
+          {/* Sticky header: day names + priorities lane */}
+          <div className={cn("sticky top-0 z-20 col-span-full grid border-b border-border-subtle bg-card/95 backdrop-blur-md", WEEK_COLS)}>
+            <div aria-hidden className="sticky left-0 z-30 bg-card" />
+            {days.map((d) => (
+              <DayHeader key={d} date={d} isToday={d === today} isPast={d < today} />
+            ))}
+            <div className="sticky left-0 z-30 flex justify-center border-t border-border-subtle bg-card pt-2.5">
+              <Tooltip>
+                <TooltipTrigger render={<span className="flex text-muted-foreground" />}>
+                  <ListChecks aria-hidden className="size-4" />
+                  <span className="sr-only">Priorities</span>
+                </TooltipTrigger>
+                <TooltipContent side="right">Priorities for the day</TooltipContent>
+              </Tooltip>
+            </div>
+            {days.map((d) => (
+              <PriorityLane
+                key={d}
+                date={d}
+                items={props.dayItems[d] ?? []}
+                rolesById={props.rolesById}
+                onToggle={props.onToggleItem}
+                onOpen={props.onOpenItem}
+                draggingId={props.draggingId}
+                available={laneDrag}
+              />
+            ))}
           </div>
+
+          {/* Hour labels, and the now pill that ties today's line to the gutter */}
+          <div className="sticky left-0 z-10 bg-card" style={{ height: hours.length * HOUR_PX }}>
+            {hours.map((h, i) => {
+              // A pill (now, or the drop time during a drag) replaces the hour label it would sit on.
+              const covered = pillYs.some((y) => Math.abs(i * HOUR_PX - y) < 12);
+              return i === 0 ? null : (
+                <div
+                  key={h}
+                  aria-hidden={covered || undefined}
+                  className={cn("absolute right-2 -translate-y-1/2 text-2xs text-muted-foreground tabular-nums", covered && "invisible")}
+                  style={{ top: i * HOUR_PX }}
+                >
+                  {formatMinutes(h * 60)}
+                </div>
+              );
+            })}
+            {showNow && (
+              <div
+                className="absolute right-1 z-10 -translate-y-1/2 rounded-full bg-primary px-1.5 text-2xs font-medium text-primary-foreground tabular-nums"
+                style={{ top: nowY }}
+              >
+                <span className="sr-only">Now, </span>
+                {formatMinutes(nowMin)}
+              </div>
+            )}
+            {hover && (
+              // Where a drag would land, read off the gutter: the slot itself is usually under the drag preview.
+              <div
+                aria-hidden
+                className="absolute right-1 z-10 -translate-y-1/2 rounded-full bg-card px-1.5 text-2xs font-medium text-primary-ink tabular-nums ring-1 ring-primary"
+                style={{ top: hoverY }}
+              >
+                {formatMinutes(hover.startMin)}
+              </div>
+            )}
+          </div>
+
           {days.map((d) => (
-            <PriorityLane
+            <DayColumn
               key={d}
               date={d}
-              items={props.dayItems[d] ?? []}
+              isToday={d === today}
+              nowMark={showNow ? (d === today ? "today" : d < today ? "before" : null) : null}
+              nowY={nowY}
+              hours={hours.length}
+              dayStartMin={dayStartMin}
+              dayEndMin={dayEndMin}
+              blocks={props.blocks.filter((b) => b.date === d)}
               rolesById={props.rolesById}
-              onToggle={props.onToggleItem}
-              onOpen={props.onOpenItem}
+              hover={props.hover?.date === d ? props.hover : null}
               draggingId={props.draggingId}
+              registerColumn={props.registerColumn}
+              onCreateAt={props.onCreateAt}
+              onOpenBlock={props.onOpenBlock}
+              onResizeBlock={props.onResizeBlock}
+              onToggleBlockDone={props.onToggleBlockDone}
             />
           ))}
         </div>
-
-        {/* Hour labels */}
-        <div className="relative" style={{ height: hours.length * HOUR_PX }}>
-          {hours.map((h, i) => (
-            <div key={h} className="absolute right-1.5 -translate-y-1/2 text-[10px] text-muted-foreground tabular-nums" style={{ top: i * HOUR_PX }}>
-              {i === 0 ? "" : formatMinutes(h * 60)}
-            </div>
-          ))}
-        </div>
-
-        {days.map((d) => (
-          <DayColumn
-            key={d}
-            date={d}
-            isToday={d === today}
-            hours={hours.length}
-            dayStartMin={dayStartMin}
-            dayEndMin={dayEndMin}
-            blocks={props.blocks.filter((b) => b.date === d)}
-            rolesById={props.rolesById}
-            hover={props.hover?.date === d ? props.hover : null}
-            draggingId={props.draggingId}
-            registerColumn={props.registerColumn}
-            onCreateAt={props.onCreateAt}
-            onOpenBlock={props.onOpenBlock}
-            onResizeBlock={props.onResizeBlock}
-            onToggleBlockDone={props.onToggleBlockDone}
-          />
-        ))}
       </div>
-    </div>
+    </Card>
   );
 }
 
-function DayHeader({ date, isToday }: { date: string; isToday: boolean }) {
+function DayHeader({ date, isToday, isPast }: { date: string; isToday: boolean; isPast: boolean }) {
   const d = fromISODate(date);
   return (
-    <div className="flex flex-col items-center gap-0.5 border-l py-2">
-      <span className={cn("text-[11px] font-medium uppercase", isToday ? "text-primary" : "text-muted-foreground")}>{fmtDate(date, "EEE")}</span>
+    <div aria-current={isToday ? "date" : undefined} className="flex flex-col items-center border-l border-border-subtle pt-2 pb-1.5">
+      <span className={cn("text-2xs font-medium", isPast ? "text-faint-foreground" : "text-muted-foreground")}>{fmtDate(date, "EEE")}</span>
       <span
         className={cn(
-          "grid size-7 place-items-center rounded-full text-sm font-semibold tabular-nums",
-          isToday && "bg-primary text-primary-foreground",
+          "mt-0.5 grid size-8 place-items-center rounded-full text-lg font-medium tabular-nums",
+          isToday ? "bg-primary text-primary-foreground" : isPast ? "text-faint-foreground" : "text-foreground",
         )}
       >
         {d.getDate()}
@@ -150,6 +232,7 @@ function PriorityLane({
   onToggle,
   onOpen,
   draggingId,
+  available,
 }: {
   date: string;
   items: Task[];
@@ -157,6 +240,7 @@ function PriorityLane({
   onToggle: (t: Task) => void;
   onOpen: (t: Task) => void;
   draggingId: string | null;
+  available: boolean;
 }) {
   const { ref, isDropTarget } = useDroppable<DropData>({
     id: `prio:${date}`,
@@ -164,18 +248,28 @@ function PriorityLane({
     accept: ["goal", "dayitem"],
     collisionDetector: pointerIntersection,
   });
+  const drop: DropState = isDropTarget ? "over" : available ? "available" : "idle";
   return (
     <div
       ref={ref}
       className={cn(
-        "flex max-h-32 min-h-14 flex-col gap-1 overflow-y-auto border-t border-l p-1 scrollbar-thin transition-colors",
-        isDropTarget && "bg-primary/10 ring-2 ring-primary/40 ring-inset",
+        // p-1, not p-1.5: at the narrowest day column every pixel goes to the chip titles.
+        "flex max-h-32 min-h-14 flex-col gap-1 overflow-y-auto border-t border-l border-border-subtle p-1 scrollbar-thin transition-[background-color,outline-color] duration-180 ease-out",
+        dropZone(drop),
       )}
     >
       {items.map((t) => (
-        <PriorityChip key={t.id} task={t} date={date} role={t.roleId ? rolesById.get(t.roleId) : undefined} onToggle={onToggle} onOpen={onOpen} hidden={draggingId === `dayitem:${t.id}`} />
+        <PriorityChip
+          key={t.id}
+          task={t}
+          date={date}
+          role={t.roleId ? rolesById.get(t.roleId) : undefined}
+          onToggle={onToggle}
+          onOpen={onOpen}
+          hidden={draggingId === `dayitem:${t.id}`}
+        />
       ))}
-      {items.length === 0 && <div className="m-auto text-[10px] text-muted-foreground/60">drop here</div>}
+      {items.length === 0 && available && <div className="m-auto text-2xs text-muted-foreground">Drop here</div>}
     </div>
   );
 }
@@ -197,29 +291,55 @@ function PriorityChip({
 }) {
   const { ref } = useDraggable<DragData>({ id: `dayitem:${task.id}`, type: "dayitem", data: { kind: "dayitem", task, date }, sensors: cardSensors });
   const done = task.status === "done";
+  const marked = task.kind === "goal" || !!task.priority;
   return (
     <div
       ref={ref}
+      data-done={done || undefined}
+      style={role ? ({ "--role": role.color } as CSSProperties) : undefined}
       className={cn(
-        "group flex cursor-grab items-center gap-1 rounded-md border bg-background px-1 py-0.5 text-[11px] leading-tight shadow-xs active:cursor-grabbing",
-        hidden && "opacity-30",
+        "role-scope @container/chip flex cursor-grab items-start gap-1 rounded-lg bg-card px-1.5 py-1 text-2xs shadow-xs ring-1 ring-edge active:cursor-grabbing",
+        hidden && dragSource,
       )}
-      style={{ borderLeftColor: role?.color, borderLeftWidth: role ? 3 : 1 }}
     >
-      <button
-        type="button"
-        aria-label={done ? "Mark not done" : "Mark done"}
-        data-no-drag
-        onClick={() => onToggle(task)}
-        className={cn("grid size-3.5 shrink-0 place-items-center rounded-sm border", done && "border-primary bg-primary text-primary-foreground")}
-      >
-        {done && <Check className="size-2.5" />}
-      </button>
-      <button type="button" onClick={() => onOpen(task)} title={task.title} className={cn("line-clamp-2 min-w-0 flex-1 text-left break-words", done && "text-muted-foreground line-through")}>
-        {task.kind === "goal" && <Mountain className="mr-0.5 inline size-3 text-primary" />}
-        {task.priority && <span className="mr-0.5 font-semibold text-muted-foreground">{task.priority}</span>}
-        {task.title}
-      </button>
+      {/* The check, then the rock icon and priority letter. In a narrow day column they stack under the
+          check, so the title keeps the width for whole words; from an 8rem chip they sit beside it and the
+          text steps up to text-xs. Each row is one title line tall, so the check centres on the first line. */}
+      <span className="flex shrink-0 flex-col items-center @[8rem]/chip:flex-row @[8rem]/chip:gap-1 @[8rem]/chip:text-xs">
+        <span className="flex h-4 items-center @[8rem]/chip:h-4.5">
+          <DoneCheck
+            size="sm"
+            done={done}
+            color={role?.color}
+            celebrate={task.kind === "goal" && task.quadrant === 2}
+            onToggle={() => onToggle(task)}
+            data-no-drag
+            aria-label={done ? "Mark not done" : "Mark done"}
+          />
+        </span>
+        {marked && (
+          <span aria-hidden className="flex h-4 items-center gap-0.5 text-muted-foreground @[8rem]/chip:h-4.5">
+            {task.kind === "goal" && <Mountain className="size-3.5" />}
+            {task.priority && <span className="font-semibold">{task.priority}</span>}
+          </span>
+        )}
+      </span>
+      <Tooltip>
+        <TooltipTrigger
+          delay={600}
+          render={
+            <button
+              type="button"
+              onClick={() => onOpen(task)}
+              className="line-clamp-2 min-w-0 flex-1 rounded-xs text-left break-words @[8rem]/chip:text-xs"
+            />
+          }
+        >
+          {task.priority && <span className="sr-only">{task.priority} </span>}
+          <span className="strike">{task.title}</span>
+        </TooltipTrigger>
+        <TooltipContent>{task.title}</TooltipContent>
+      </Tooltip>
     </div>
   );
 }
@@ -227,6 +347,8 @@ function PriorityChip({
 function DayColumn({
   date,
   isToday,
+  nowMark,
+  nowY,
   hours,
   dayStartMin,
   dayEndMin,
@@ -242,6 +364,9 @@ function DayColumn({
 }: {
   date: string;
   isToday: boolean;
+  /** Where the now line runs in this column: solid in today's, a faint lead-in on the days before it. */
+  nowMark: "today" | "before" | null;
+  nowY: number;
   hours: number;
   dayStartMin: number;
   dayEndMin: number;
@@ -255,7 +380,7 @@ function DayColumn({
   onResizeBlock: (b: Block, endMin: number) => void;
   onToggleBlockDone: (b: Block) => void;
 }) {
-  const { ref, isDropTarget } = useDroppable<DropData>({
+  const { ref } = useDroppable<DropData>({
     id: `grid:${date}`,
     data: { kind: "grid", date },
     accept: ["goal", "dayitem", "block"],
@@ -269,13 +394,13 @@ function DayColumn({
     [ref, registerColumn, date],
   );
   const laid = layoutLanes(blocks);
-  const now = useNow(60_000);
-  const nowMin = now.getHours() * 60 + now.getMinutes();
 
+  // The registered element is exactly the timed area: every decoration inside it is
+  // pointer-events-none, so a click on empty time reaches it (e.target === e.currentTarget).
   return (
     <div
       ref={setRefs}
-      className={cn("relative border-l", isToday && "bg-primary/[0.03]", isDropTarget && "bg-primary/5")}
+      className={cn("relative snap-start border-l border-border-subtle", isToday && TODAY_WASH)}
       style={{ height: hours * HOUR_PX }}
       onClick={(e) => {
         if (e.target !== e.currentTarget) return;
@@ -286,21 +411,34 @@ function DayColumn({
       }}
     >
       {Array.from({ length: hours }, (_, i) => (
-        <div key={i} className="pointer-events-none absolute inset-x-0 border-t border-border/60" style={{ top: i * HOUR_PX }}>
-          <div className="absolute inset-x-0 border-t border-dashed border-border/30" style={{ top: HOUR_PX / 2 }} />
+        <div
+          key={i}
+          aria-hidden
+          className={cn("pointer-events-none absolute inset-x-0", i > 0 && "border-t border-border-subtle")}
+          style={{ top: i * HOUR_PX }}
+        >
+          <div className="absolute inset-x-0 border-t border-dotted border-border-subtle" style={{ top: HOUR_PX / 2 }} />
         </div>
       ))}
-      {isToday && nowMin >= dayStartMin && nowMin <= dayEndMin && (
-        <div className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-q1" style={{ top: minuteToY(nowMin, dayStartMin) }}>
-          <div className="absolute -top-1 -left-1 size-2.5 rounded-full bg-q1" />
+      {nowMark === "before" && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 h-px -translate-y-1/2 bg-[color-mix(in_oklab,var(--primary)_35%,transparent)] dark:bg-[color-mix(in_oklab,var(--primary)_60%,transparent)]"
+          style={{ top: nowY }}
+        />
+      )}
+      {nowMark === "today" && (
+        <div aria-hidden className="pointer-events-none absolute inset-x-0 z-6 h-0.5 -translate-y-1/2 bg-primary" style={{ top: nowY }}>
+          <div className="absolute top-1/2 left-0 size-2 -translate-y-1/2 rounded-full bg-primary" />
         </div>
       )}
       {hover && (
         <div
-          className="pointer-events-none absolute inset-x-1 z-10 rounded-md border-2 border-dashed border-primary bg-primary/10"
-          style={{ top: minuteToY(hover.startMin, dayStartMin), height: Math.max(12, (hover.endMin - hover.startMin) * PX_PER_MIN) }}
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0.5 z-6 rounded-sm bg-[color-mix(in_oklab,var(--primary)_10%,transparent)] outline-1 -outline-offset-1 outline-primary/60"
+          style={{ top: minuteToY(hover.startMin, dayStartMin), height: blockHeight(hover.endMin - hover.startMin) }}
         >
-          <span className="absolute top-0.5 left-1 text-[10px] font-medium text-primary">
+          <span className="absolute top-0.5 left-1.5 text-2xs font-medium text-primary-ink tabular-nums">
             {formatMinutes(hover.startMin)}–{formatMinutes(hover.endMin)}
           </span>
         </div>
@@ -314,9 +452,10 @@ function DayColumn({
           dayEndMin={dayEndMin}
           style={{
             top: minuteToY(Math.max(b.startMin, dayStartMin), dayStartMin),
-            height: Math.max(14, (Math.min(b.endMin, dayEndMin) - Math.max(b.startMin, dayStartMin)) * PX_PER_MIN - 2),
-            left: `calc(${(lane / lanes) * 100}% + 2px)`,
-            width: `calc(${100 / lanes}% - 4px)`,
+            height: blockHeight(Math.min(b.endMin, dayEndMin) - Math.max(b.startMin, dayStartMin)),
+            // 2px from the column lines and 2px between side-by-side lanes.
+            left: `calc(2px + ${lane} * (100% - 2px) / ${lanes})`,
+            width: `calc((100% - 2px) / ${lanes} - 2px)`,
           }}
           hidden={draggingId === `block:${b.id}`}
           onOpen={onOpenBlock}
@@ -324,6 +463,46 @@ function DayColumn({
           onToggleDone={onToggleBlockDone}
         />
       ))}
+    </div>
+  );
+}
+
+/**
+ * The first line of a block keeps clear of the done check wherever the check always shows: on a done
+ * block, and on touch. The time line sits below the check, so it keeps the full width.
+ */
+const CHECK_ROOM = "in-data-[done]:pr-4 pointer-coarse:pr-4";
+
+/** A block's text, by tier: title only (≤20 min), "Title · 09:30" (≤40), or title then time. */
+function BlockBody({ block, endMin, tier, height }: { block: Block; endMin: number; tier: EventTier; height: number }) {
+  const title = block.title || block.taskTitle || "Untitled";
+  const goal = block.taskKind === "goal" && <Mountain aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
+  if (tier === "md") {
+    return (
+      <>
+        <div className={cn("flex min-w-0 items-start gap-1", CHECK_ROOM)}>
+          {goal && <span className="flex h-4 shrink-0 items-center">{goal}</span>}
+          {/* Title lines set 16px apart, so an hour-long block (54px) fits two of them above its time. */}
+          <EventTitle as="div" className={cn("min-w-0 text-xs leading-4 break-words", height < 52 ? "line-clamp-1" : "line-clamp-2")}>
+            {title}
+          </EventTitle>
+        </div>
+        <EventTime className="truncate text-2xs">
+          {formatMinutes(block.startMin)}–{formatMinutes(endMin)}
+        </EventTime>
+      </>
+    );
+  }
+  return (
+    <div className={cn("flex min-w-0 items-center gap-1 whitespace-nowrap", tier === "xs" ? "text-2xs" : "text-xs", CHECK_ROOM)}>
+      {goal}
+      <EventTitle className="min-w-0 truncate">{title}</EventTitle>
+      {tier === "sm" && (
+        <>
+          <MetaSep className="hidden shrink-0 @[9rem]:inline" />
+          <EventTime className="hidden shrink-0 @[9rem]:inline">{formatMinutes(block.startMin)}</EventTime>
+        </>
+      )}
     </div>
   );
 }
@@ -341,7 +520,7 @@ function GridBlock({
 }: {
   block: Block;
   role: Role | undefined;
-  style: CSSProperties;
+  style: CSSProperties & { height: number };
   hidden: boolean;
   dayStartMin: number;
   dayEndMin: number;
@@ -353,11 +532,11 @@ function GridBlock({
   const { ref } = useDraggable<DragData>({ id: `block:${block.id}`, type: "block", data: { kind: "block", block }, handle: handleRef, sensors: cardSensors });
   const [resizeEnd, setResizeEnd] = useState<number | null>(null);
   const endMin = resizeEnd ?? block.endMin;
-  const height = resizeEnd != null ? Math.max(14, (Math.min(resizeEnd, dayEndMin) - Math.max(block.startMin, dayStartMin)) * PX_PER_MIN - 2) : style.height;
+  const height = resizeEnd != null ? blockHeight(Math.min(resizeEnd, dayEndMin) - Math.max(block.startMin, dayStartMin)) : style.height;
   const done = block.status === "done" || block.taskStatus === "done";
   const skipped = block.status === "skipped";
-  const color = role?.color ?? "var(--muted-foreground)";
-  const compact = (endMin - block.startMin) < 45;
+  const tier = tierFor(endMin - block.startMin);
+  const title = block.title || block.taskTitle || "Untitled";
 
   const startResize = (e: React.PointerEvent) => {
     e.preventDefault();
@@ -392,81 +571,95 @@ function GridBlock({
   return (
     <div
       ref={ref}
-      className={cn(
-        "group absolute z-[5] flex flex-col overflow-hidden rounded-md border text-[11px] leading-tight shadow-xs transition-opacity",
-        block.kind === "appointment" ? "bg-background" : "",
-        hidden && "opacity-30",
-        skipped && "opacity-50",
-      )}
-      style={{
-        ...style,
-        height,
-        borderLeft: `3px solid ${color}`,
-        backgroundColor: block.kind === "focus" ? `color-mix(in oklch, ${color} 14%, var(--card))` : undefined,
-      }}
+      data-done={done || undefined}
+      data-skipped={skipped || undefined}
+      className={cn(eventBlockVariants({ kind: block.kind, layout: "grid" }), "group absolute z-5 flex flex-col p-0", hidden && dragSource)}
+      style={{ ...style, height, ...roleVar(role) }}
     >
+      {/* The tooltip gives the full title and time, which short blocks clip or leave out. It opens to the
+          right so it never covers the slot a drag would land in. */}
+      <Tooltip>
+        <TooltipTrigger
+          delay={600}
+          render={
+            <div
+              ref={handleRef}
+              role="button"
+              tabIndex={0}
+              aria-label={`${title}, ${formatMinutes(block.startMin)}–${formatMinutes(endMin)}`}
+              onClick={() => onOpen(block)}
+              onKeyDown={(e) => e.key === "Enter" && onOpen(block)}
+              className={cn(
+                "@container flex min-h-0 flex-1 cursor-grab flex-col rounded-sm pr-1.5 pl-2.5 focus-ring-inset active:cursor-grabbing",
+                TIER_PAD[tier],
+              )}
+            />
+          }
+        >
+          <BlockBody block={block} endMin={endMin} tier={tier} height={height} />
+        </TooltipTrigger>
+        <TooltipContent side="right" className="tabular-nums">
+          {title} · {formatMinutes(block.startMin)}–{formatMinutes(endMin)}
+        </TooltipContent>
+      </Tooltip>
       <div
-        ref={handleRef}
-        role="button"
-        tabIndex={0}
-        onClick={() => onOpen(block)}
-        onKeyDown={(e) => e.key === "Enter" && onOpen(block)}
-        className="flex min-h-0 flex-1 cursor-grab flex-col gap-0.5 px-1.5 py-1 active:cursor-grabbing"
-        title={`${block.title} · ${formatMinutes(block.startMin)}–${formatMinutes(endMin)}`}
-      >
-        <div className={cn("flex items-start gap-1 font-medium", (done || skipped) && "line-through decoration-muted-foreground")}>
-          {block.taskKind === "goal" && <Mountain className="mt-px size-3 shrink-0 text-primary" />}
-          <span className={cn(compact ? "truncate" : "line-clamp-3")}>{block.title || block.taskTitle || "Untitled"}</span>
-        </div>
-        {!compact && (
-          <div className="text-[10px] text-muted-foreground tabular-nums">
-            {formatMinutes(block.startMin)}–{formatMinutes(endMin)} · {formatDuration(endMin - block.startMin)}
-          </div>
-        )}
-      </div>
-      <button
-        type="button"
+        onPointerDown={startResize}
+        className="absolute inset-x-0 bottom-0 h-2 cursor-ns-resize opacity-0 transition-opacity duration-120 group-hover:opacity-100 after:absolute after:bottom-0.5 after:left-1/2 after:h-0.5 after:w-6 after:-translate-x-1/2 after:rounded-full after:bg-foreground/30 pointer-coarse:opacity-100"
+        aria-hidden
+      />
+      <DoneCheck
+        size="sm"
+        done={done}
+        color={role?.color}
         onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
+        onToggle={(e) => {
           e.stopPropagation();
           onToggleDone(block);
         }}
         aria-label={done ? "Mark as not done" : "Mark as done"}
         className={cn(
-          "absolute top-1 right-1 grid size-4 place-items-center rounded-sm border bg-background/80 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100",
-          done && "border-primary bg-primary text-primary-foreground opacity-100",
+          "absolute right-1 opacity-0 transition-[opacity,background-color,border-color,scale] group-hover:opacity-100 focus-visible:opacity-100 data-[done]:opacity-100 pointer-coarse:opacity-100",
+          tier === "xs" ? "top-0.5" : "top-1",
         )}
-      >
-        {done && <Check className="size-3" />}
-      </button>
-      <div
-        onPointerDown={startResize}
-        className="absolute inset-x-0 bottom-0 h-1.5 cursor-ns-resize opacity-0 group-hover:bg-foreground/20 group-hover:opacity-100"
-        aria-hidden
       />
     </div>
   );
 }
 
-export function DragPreview({ data, rolesById }: { data: DragData | undefined; rolesById: Map<string, Role> }): ReactNode {
+export function DragPreview({
+  data,
+  rolesById,
+  columnWidth,
+}: {
+  data: DragData | undefined;
+  rolesById: Map<string, Role>;
+  /** Width of the dragged block's day column, so the preview keeps the block's shape. */
+  columnWidth?: number | null;
+}): ReactNode {
   if (!data) return null;
   if (data.kind === "block") {
     const b = data.block;
     const role = b.effectiveRoleId ? rolesById.get(b.effectiveRoleId) : undefined;
+    const minutes = b.endMin - b.startMin;
+    const tier = tierFor(minutes);
+    const height = blockHeight(minutes);
     return (
       <div
-        className="rounded-md border bg-card px-1.5 py-1 text-[11px] font-medium shadow-lg"
-        style={{ borderLeft: `3px solid ${role?.color ?? "var(--muted-foreground)"}`, height: Math.max(14, (b.endMin - b.startMin) * PX_PER_MIN - 2), width: 140 }}
+        data-done={b.status === "done" || b.taskStatus === "done" || undefined}
+        data-skipped={b.status === "skipped" || undefined}
+        className={cn(eventBlockVariants({ kind: b.kind, layout: "grid" }), "@container flex animate-dnd-lift flex-col", TIER_PAD[tier])}
+        style={{ height, width: columnWidth ? columnWidth - 4 : 140, ...roleVar(role) }}
       >
-        {b.title || b.taskTitle}
+        <BlockBody block={b} endMin={b.endMin} tier={tier} height={height} />
       </div>
     );
   }
   const t = data.task;
   const role = t.roleId ? rolesById.get(t.roleId) : undefined;
   return (
-    <div className="flex max-w-60 items-center gap-1.5 rounded-lg border bg-card px-2 py-1.5 text-xs font-medium shadow-lg">
+    <div className={cn(boardCard, "flex w-max max-w-60 animate-dnd-lift items-center gap-2 py-2")}>
       <RoleDot color={role?.color} />
+      {t.kind === "goal" && <Mountain aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
       <span className="truncate">{t.title}</span>
     </div>
   );

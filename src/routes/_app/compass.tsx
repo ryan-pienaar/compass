@@ -21,7 +21,8 @@ function CompassPage() {
   return (
     <Page width="wide">
       <PageHeader
-        eyebrow="Habit 2 · Begin with the end in mind"
+        habit={2}
+        eyebrow="Begin with the end in mind"
         title="Your compass"
         description="Leadership comes before management. Know what matters (your mission, your principles, who you want to be), and every week and day can be measured against it."
       />
@@ -32,16 +33,16 @@ function CompassPage() {
           <TabsTrigger value="exercises">Exercises</TabsTrigger>
           <TabsTrigger value="center">Your center</TabsTrigger>
         </TabsList>
-        <TabsContent value="mission" className="pt-4">
+        <TabsContent value="mission">
           <MissionTab />
         </TabsContent>
-        <TabsContent value="affirmations" className="pt-4">
+        <TabsContent value="affirmations">
           <AffirmationsTab />
         </TabsContent>
-        <TabsContent value="exercises" className="pt-4">
+        <TabsContent value="exercises">
           <ExercisesTab />
         </TabsContent>
-        <TabsContent value="center" className="pt-4">
+        <TabsContent value="center">
           <CenterTab />
         </TabsContent>
       </Tabs>

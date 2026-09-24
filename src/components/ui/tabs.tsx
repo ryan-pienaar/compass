@@ -2,6 +2,12 @@ import { Tabs as TabsPrimitive } from "@base-ui/react/tabs"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
+/*
+ * Folio §6.1 Tabs: one style, an underline with a sliding ink bar (Base UI Tabs.Indicator,
+ * positioned by --active-tab-left / --active-tab-width). `variant` is still accepted;
+ * "default" and "line" render the same. Panels fade in on enter only and are never kept mounted.
+ */
+
 function Tabs({
   className,
   orientation = "horizontal",
@@ -21,12 +27,15 @@ function Tabs({
 }
 
 const tabsListVariants = cva(
-  "group/tabs-list inline-flex w-fit items-center justify-center rounded-lg p-[3px] text-muted-foreground group-data-horizontal/tabs:h-8 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col data-[variant=line]:rounded-none",
+  // Additions to the §6.1 string: the 40px triggers sit in a 39px content box (the list's border
+  // takes 1px), so overflow-y-hidden stops a 1px vertical scroll; pointer-coarse:h-11 matches the
+  // 44px touch triggers so they aren't clipped.
+  "group/tabs-list relative flex h-10 w-full items-center gap-1 overflow-x-auto overflow-y-hidden no-scrollbar scroll-fade-x border-b border-border-subtle pointer-coarse:h-11",
   {
     variants: {
       variant: {
-        default: "bg-muted",
-        line: "gap-1 bg-transparent",
+        default: "",
+        line: "",
       },
     },
     defaultVariants: {
@@ -38,6 +47,7 @@ const tabsListVariants = cva(
 function TabsList({
   className,
   variant = "default",
+  children,
   ...props
 }: TabsPrimitive.List.Props & VariantProps<typeof tabsListVariants>) {
   return (
@@ -46,7 +56,15 @@ function TabsList({
       data-variant={variant}
       className={cn(tabsListVariants({ variant }), className)}
       {...props}
-    />
+    >
+      {children}
+      <TabsPrimitive.Indicator
+        data-slot="tabs-indicator"
+        // Under reduced motion the bar jumps (ink and bar still mark the tab); in forced colours it
+        // keeps a system colour, since backgrounds are otherwise flattened to Canvas.
+        className="absolute bottom-0 left-0 h-0.5 w-(--active-tab-width) translate-x-(--active-tab-left) rounded-full bg-foreground transition-[translate,width] duration-180 ease-in-out data-[activation-direction=none]:transition-none motion-reduce:transition-none forced-color-adjust-none forced-colors:bg-[Highlight]"
+      />
+    </TabsPrimitive.List>
   )
 }
 
@@ -55,10 +73,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium whitespace-nowrap text-foreground/60 transition-all group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
-        "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
-        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        "relative inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors duration-120 hover:text-foreground data-active:text-foreground focus-ring-inset disabled:pointer-events-none disabled:opacity-45 pointer-coarse:h-11 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
@@ -70,7 +85,10 @@ function TabsContent({ className, ...props }: TabsPrimitive.Panel.Props) {
   return (
     <TabsPrimitive.Panel
       data-slot="tabs-content"
-      className={cn("flex-1 text-sm outline-none", className)}
+      className={cn(
+        "pt-6 text-sm transition-opacity duration-120 ease-out data-starting-style:opacity-0",
+        className
+      )}
       {...props}
     />
   )

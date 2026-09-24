@@ -3,6 +3,7 @@
 import { useMemo } from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
+import { CircleAlert } from "lucide-react"
 
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -30,7 +31,7 @@ function FieldLegend({
       data-slot="field-legend"
       data-variant={variant}
       className={cn(
-        "mb-1.5 font-medium data-[variant=label]:text-sm data-[variant=legend]:text-base",
+        "mb-1.5 text-foreground data-[variant=label]:text-sm data-[variant=label]:font-medium data-[variant=legend]:text-base data-[variant=legend]:font-semibold",
         className
       )}
       {...props}
@@ -90,7 +91,7 @@ function FieldContent({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="field-content"
       className={cn(
-        "group/field-content flex flex-1 flex-col gap-0.5 leading-snug",
+        "group/field-content flex flex-1 flex-col gap-0.5",
         className
       )}
       {...props}
@@ -105,9 +106,11 @@ function FieldLabel({
   return (
     <Label
       data-slot="field-label"
+      size="sm"
       className={cn(
-        "group/field-label peer/field-label flex w-fit gap-2 leading-snug group-data-[disabled=true]/field:opacity-50 has-data-checked:border-primary/30 has-data-checked:bg-primary/5 has-[>[data-slot=field]]:rounded-lg has-[>[data-slot=field]]:border has-[>[data-slot=field]]:not-has-[:disabled,[data-disabled]]:hover:bg-muted/50 has-[>[data-slot=field]]:has-[:focus-visible]:border-ring has-[>[data-slot=field]]:has-[:focus-visible]:ring-3 has-[>[data-slot=field]]:has-[:focus-visible]:ring-ring/50 *:data-[slot=field]:p-2.5 dark:has-data-checked:border-primary/20 dark:has-data-checked:bg-primary/10",
-        "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:flex-col",
+        "group/field-label peer/field-label flex w-fit gap-2 group-data-[disabled=true]/field:opacity-45",
+        // A label wrapping a whole Field is a choice card (the plan option-card recipe).
+        "has-[>[data-slot=field]]:w-full has-[>[data-slot=field]]:flex-col has-[>[data-slot=field]]:rounded-xl has-[>[data-slot=field]]:bg-card has-[>[data-slot=field]]:text-sm has-[>[data-slot=field]]:text-foreground has-[>[data-slot=field]]:shadow-xs has-[>[data-slot=field]]:ring-1 has-[>[data-slot=field]]:ring-edge has-[>[data-slot=field]]:transition-shadow has-[>[data-slot=field]]:duration-120 has-[>[data-slot=field]]:not-has-[:disabled,[data-disabled],[data-checked]]:hover:ring-border-strong has-[>[data-slot=field]]:has-data-checked:ring-2 has-[>[data-slot=field]]:has-data-checked:ring-primary *:data-[slot=field]:p-4",
         className
       )}
       {...props}
@@ -120,7 +123,7 @@ function FieldTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="field-label"
       className={cn(
-        "flex w-fit items-center gap-2 text-sm font-medium group-data-[disabled=true]/field:opacity-50",
+        "flex w-fit items-center gap-2 text-sm font-medium text-foreground group-data-[disabled=true]/field:opacity-45",
         className
       )}
       {...props}
@@ -133,9 +136,9 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="field-description"
       className={cn(
-        "text-left text-sm leading-normal font-normal text-muted-foreground group-has-data-horizontal/field:text-balance [[data-variant=legend]+&]:-mt-1.5",
+        "text-left text-xs font-normal text-muted-foreground group-has-data-horizontal/field:text-balance [[data-variant=legend]+&]:-mt-1.5",
         "last:mt-0 nth-last-2:-mt-1",
-        "[&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
+        "[&>a]:text-primary-ink [&>a]:underline [&>a]:underline-offset-4",
         className
       )}
       {...props}
@@ -155,7 +158,7 @@ function FieldSeparator({
       data-slot="field-separator"
       data-content={!!children}
       className={cn(
-        "relative -my-2 h-5 text-sm group-data-[variant=outline]/field-group:-mb-2",
+        "relative -my-2 h-5 text-xs group-data-[variant=outline]/field-group:-mb-2",
         className
       )}
       {...props}
@@ -163,7 +166,7 @@ function FieldSeparator({
       <Separator className="absolute inset-0 top-1/2" />
       {children && (
         <span
-          className="relative mx-auto block w-fit bg-background px-2 text-muted-foreground"
+          className="relative mx-auto block w-fit bg-popover px-2 text-muted-foreground"
           data-slot="field-separator-content"
         >
           {children}
@@ -216,9 +219,13 @@ function FieldError({
     <div
       role="alert"
       data-slot="field-error"
-      className={cn("text-sm font-normal text-destructive", className)}
+      className={cn(
+        "flex items-center gap-1.5 text-xs font-medium text-destructive",
+        className
+      )}
       {...props}
     >
+      <CircleAlert aria-hidden className="size-3.5 shrink-0" />
       {content}
     </div>
   )

@@ -1,24 +1,31 @@
 import { Link } from "@tanstack/react-router";
-import { Ban, CalendarClock, HeartHandshake, Mountain, Sun } from "lucide-react";
+import { CalendarClock, CircleX, HeartHandshake, Hourglass, ListChecks, Mountain, MoreHorizontal, Sun, Sunrise } from "lucide-react";
 import { addDaysISO } from "@shared/dates.ts";
 import { useAppState } from "@/components/app-state";
 import { QuadrantBadge, RoleDot } from "@/components/badges";
+import { IconButton } from "@/components/icon-button";
+import { SectionHeader } from "@/components/page";
+import { Row, RowActions, RowMeta, RowTitle } from "@/components/row";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import type { Delegation, Task } from "@/lib/api";
 import { relativeDay } from "@/lib/format";
 import { useRolesMap } from "@/lib/hooks";
 import { useTaskActions } from "@/lib/mutations";
 import { cn } from "@/lib/utils";
 
-function Panel({ title, icon, children, className }: { title: string; icon: React.ReactNode; children: React.ReactNode; className?: string }) {
+/** The day word beside a row title: a plan, so always plain meta, never late. */
+function DayMeta({ children, className }: { children: React.ReactNode; className?: string }) {
+  return <span className={cn("shrink-0 text-xs text-muted-foreground tabular-nums", className)}>{children}</span>;
+}
+
+/** A two-line row body that opens the task: the title, then its meta (quadrant first). */
+function TitleButton({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <section className={cn("rounded-xl border bg-card p-3", className)}>
-      <h3 className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase [&_svg]:size-3.5">
-        {icon}
-        {title}
-      </h3>
-      {children}
-    </section>
+    <button type="button" onClick={onClick} className="min-w-0 flex-1 rounded-xs text-left focus-ring-inset">
+      <RowTitle>{title}</RowTitle>
+      <RowMeta as="span" className="flex-nowrap gap-x-2">{children}</RowMeta>
+    </button>
   );
 }
 
@@ -31,29 +38,33 @@ export function RocksPanel({ rocks, date }: { rocks: Task[]; date: string }) {
   const done = rocks.filter((r) => r.status === "done").length;
   if (rocks.length === 0) return null;
   return (
-    <Panel title={`This week's big rocks · ${done}/${rocks.length}`} icon={<Mountain />}>
+    <section>
+      <SectionHeader title="This week's big rocks" icon={<Mountain />} count={`${done} of ${rocks.length} done`} />
       {open.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Every open rock is on today&apos;s list or done.</p>
+        <p className="py-2 text-sm text-muted-foreground">Every open rock is on today&apos;s list or done.</p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="-mx-3">
           {open.map((r) => {
             const role = r.roleId ? roles.get(r.roleId) : undefined;
             return (
-              <li key={r.id} className="flex items-center gap-2 text-sm">
+              <Row as="li" key={r.id} divided className="before:left-8">
                 <RoleDot color={role?.color} />
-                <button type="button" onClick={() => openTask(r.id)} className="min-w-0 flex-1 truncate text-left hover:underline">
+                <RowTitle as="button" onClick={() => openTask(r.id)}>
                   {r.title}
-                </button>
-                {r.scheduledDate && <span className="text-[11px] text-muted-foreground">{relativeDay(r.scheduledDate, date)}</span>}
-                <Button variant="ghost" size="xs" onClick={() => update.mutate({ id: r.id, scheduledDate: date, priority: "A" })}>
-                  <Sun /> Today
-                </Button>
-              </li>
+                </RowTitle>
+                {r.scheduledDate && <DayMeta>{relativeDay(r.scheduledDate, date)}</DayMeta>}
+                {/* Revealed per row (always on touch), so the day word stands alone as the row's one date. */}
+                <RowActions className="-mr-1.5">
+                  <Button variant="ghost" size="xs" onClick={() => update.mutate({ id: r.id, scheduledDate: date, priority: "A" })}>
+                    <Sun /> Today
+                  </Button>
+                </RowActions>
+              </Row>
             );
           })}
         </ul>
       )}
-    </Panel>
+    </section>
   );
 }
 
@@ -63,43 +74,53 @@ export function UnfinishedPanel({ tasks, date }: { tasks: Task[]; date: string }
   const { openTask } = useAppState();
   if (tasks.length === 0) return null;
   return (
-    <Panel title="Waiting for a decision" icon={<CalendarClock />}>
-      <p className="mb-2 text-xs text-muted-foreground">Planned for an earlier day and still open. Choose, don&apos;t drift.</p>
-      <ul className="space-y-1.5">
+    <section>
+      <SectionHeader
+        title="Waiting for a decision"
+        icon={<Hourglass />}
+        description="Planned for an earlier day and still open. Choose, don't drift."
+      />
+      <ul className="-mx-3">
         {tasks.slice(0, 8).map((t) => (
-          <li key={t.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-            <QuadrantBadge q={t.quadrant} size="xs" />
-            <button type="button" onClick={() => openTask(t.id)} className="min-w-0 flex-1 truncate text-left hover:underline">
-              {t.title}
-            </button>
-            <span className="text-[11px] text-muted-foreground">{relativeDay(t.scheduledDate, date)}</span>
-            <div className="flex gap-0.5">
+          <Row as="li" key={t.id} divided className="before:left-3">
+            <TitleButton onClick={() => openTask(t.id)} title={t.title}>
+              <QuadrantBadge q={t.quadrant} size="xs" />
+              <span>{relativeDay(t.scheduledDate, date)}</span>
+            </TitleButton>
+            <div className="-mr-1.5 flex shrink-0 items-center gap-0.5 pointer-coarse:gap-4">
               <Button variant="ghost" size="xs" onClick={() => update.mutate({ id: t.id, scheduledDate: date })}>
-                Today
+                <Sun /> Today
               </Button>
-              <Button variant="ghost" size="xs" onClick={() => update.mutate({ id: t.id, scheduledDate: addDaysISO(date, 1) })}>
-                Tomorrow
-              </Button>
-              <Button variant="ghost" size="xs" title="Back to your list for weekly planning" onClick={() => update.mutate({ id: t.id, scheduledDate: null })}>
-                Later
-              </Button>
-              <Button variant="ghost" size="icon-xs" aria-label="Let it go" title="Let it go" onClick={() => update.mutate({ id: t.id, status: "dropped", statusReason: "declined" })}>
-                <Ban />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger render={<IconButton size="icon-xs" label="More choices" icon={<MoreHorizontal />} />} />
+                <DropdownMenuContent align="end" className="w-auto">
+                  <DropdownMenuItem onClick={() => update.mutate({ id: t.id, scheduledDate: addDaysISO(date, 1) })}>
+                    <Sunrise /> Tomorrow
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => update.mutate({ id: t.id, scheduledDate: null })}>
+                    <ListChecks /> Later
+                    <span className="ml-auto pl-4 text-xs text-muted-foreground">Back to your list for weekly planning</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => update.mutate({ id: t.id, status: "dropped", statusReason: "declined" })}>
+                    <CircleX /> Let it go
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-          </li>
+          </Row>
         ))}
       </ul>
       {tasks.length > 8 && (
         <p className="mt-2 text-xs text-muted-foreground">
           {tasks.length - 8} older {tasks.length - 8 === 1 ? "one waits" : "ones wait"} below these. Decide these first, or see them all in{" "}
-          <Link to="/tasks" className="underline">
+          <Button variant="link" size="inline" className="text-xs" render={<Link to="/tasks" />}>
             Tasks
-          </Link>
+          </Button>
           .
         </p>
       )}
-    </Panel>
+    </section>
   );
 }
 
@@ -108,44 +129,58 @@ export function DueSoonPanel({ tasks, date }: { tasks: Task[]; date: string }) {
   const { update } = useTaskActions();
   if (tasks.length === 0) return null;
   return (
-    <Panel title="Deadlines coming up" icon={<CalendarClock />}>
-      <ul className="space-y-1">
-        {tasks.map((t) => (
-          <li key={t.id} className="flex items-center gap-2 text-sm">
-            <QuadrantBadge q={t.quadrant} size="xs" />
-            <button type="button" onClick={() => openTask(t.id)} className="min-w-0 flex-1 truncate text-left hover:underline">
-              {t.title}
-            </button>
-            <span className={cn("text-[11px]", t.dueDate && t.dueDate < date ? "font-medium text-destructive" : "text-muted-foreground")}>
-              {t.dueDate && t.dueDate < date ? "was due " : "due "}
-              {relativeDay(t.dueDate, date)}
-            </span>
-            <Button variant="ghost" size="xs" onClick={() => update.mutate({ id: t.id, scheduledDate: date })}>
-              Today
-            </Button>
-          </li>
-        ))}
+    <section>
+      <SectionHeader title="Deadlines coming up" icon={<CalendarClock />} />
+      <ul className="-mx-3">
+        {tasks.map((t) => {
+          const late = !!t.dueDate && t.dueDate < date;
+          return (
+            <Row as="li" key={t.id} divided className="before:left-3">
+              <TitleButton onClick={() => openTask(t.id)} title={t.title}>
+                <QuadrantBadge q={t.quadrant} size="xs" />
+                <span className={cn("flex items-center gap-1 whitespace-nowrap", late && "font-medium text-warning")}>
+                  <CalendarClock />
+                  {late ? "was due " : "due "}
+                  {relativeDay(t.dueDate, date)}
+                </span>
+              </TitleButton>
+              {/* Like Big rocks: shown on hover, focus and touch, so a column of "Today"s never reads as a date beside "was due". */}
+              <RowActions className="-mr-1.5">
+                <Button variant="ghost" size="xs" onClick={() => update.mutate({ id: t.id, scheduledDate: date })}>
+                  <Sun /> Today
+                </Button>
+              </RowActions>
+            </Row>
+          );
+        })}
       </ul>
-    </Panel>
+    </section>
   );
 }
 
 export function CheckinsPanel({ checkins }: { checkins: Omit<Delegation, "checkins">[] }) {
   if (checkins.length === 0) return null;
   return (
-    <Panel title="Stewardship check-ins due" icon={<HeartHandshake />}>
-      <ul className="space-y-1 text-sm">
+    <section>
+      <SectionHeader title="Stewardship check-ins due" icon={<HeartHandshake />} />
+      <ul className="-mx-3">
         {checkins.map((d) => (
-          <li key={d.id} className="flex items-center justify-between gap-2">
-            <span className="truncate">
+          <Row
+            as="li"
+            key={d.id}
+            divided
+            // Nothing to act on: no plate, and the hairlines stay put on hover.
+            className="before:left-3 hover:bg-transparent hover:before:opacity-100 [&:hover+*]:before:opacity-100"
+          >
+            <RowTitle>
               {d.title} <span className="text-muted-foreground">· {d.delegate || "someone"}</span>
-            </span>
-          </li>
+            </RowTitle>
+          </Row>
         ))}
       </ul>
-      <Button variant="link" size="xs" className="mt-1 h-auto p-0" render={<Link to="/stewardships" />}>
+      <Button variant="link" size="inline" className="mt-2" render={<Link to="/stewardships" />}>
         Open stewardships
       </Button>
-    </Panel>
+    </section>
   );
 }

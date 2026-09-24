@@ -1,8 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { Pause, Play, Plus, Quote, RotateCcw, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ChevronRight, Compass, Pause, Play, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { FUNERAL_EXERCISE, MISSION_FREEWRITE_LENSES, MISSION_QUESTIONS } from "@shared/content.ts";
 import { todayISO } from "@shared/dates.ts";
+import { IconButton } from "@/components/icon-button";
+import { PrincipleNote } from "@/components/page";
+import { RowActions } from "@/components/row";
+import { SaveStatus } from "@/components/save-status";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -18,12 +22,60 @@ import { useSingletonEntry } from "./journal-singleton";
 
 export function ExercisesTab() {
   return (
-    <div className="space-y-6">
+    <div className="divide-y divide-border-subtle">
       <TributeExercise />
       <FreeWrite />
       <Questions />
       <Resources />
     </div>
+  );
+}
+
+/** The idle save status until this visit has saved something. */
+const AUTOSAVES = "Autosaves as you write";
+
+/**
+ * One exercise: a serif title, a lede, an optional status or control at the right, then the work.
+ * `measure` keeps the whole exercise to a writing column: 40rem is the 65-character measure of the
+ * 18px serif field (§3.2), and the aside then sits over the field's right edge.
+ */
+function ExerciseSection({
+  title,
+  lede,
+  aside,
+  measure = false,
+  children,
+}: {
+  title: ReactNode;
+  lede?: ReactNode;
+  aside?: ReactNode;
+  measure?: boolean;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="py-10 first:pt-0">
+      <div className={cn(measure && "max-w-160")}>
+        <header className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+          <div className="min-w-0 flex-1 basis-72 space-y-2">
+            <h2 className="voice-display text-2xl text-foreground">{title}</h2>
+            {lede && <div className="max-w-[60ch] text-sm text-muted-foreground">{lede}</div>}
+          </div>
+          {aside}
+        </header>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** Loading shape of a section: heading, lede and a block the height of the fields. */
+function SectionSkeleton({ height }: { height: string }) {
+  return (
+    <section className="space-y-3 py-10 first:pt-0">
+      <Skeleton className="h-7 w-64" />
+      <Skeleton className="h-4 w-full max-w-md" />
+      <Skeleton className={cn("mt-6", height)} />
+    </section>
   );
 }
 
@@ -33,8 +85,15 @@ type TributeData = Record<string, Record<string, string>>;
 
 function TributeExercise() {
   const { entry, isLoading, save } = useSingletonEntry("tribute");
-  if (isLoading) return <Skeleton className="h-64" />;
-  return <TributeForm initial={(entry?.data as TributeData | null) ?? {}} onSave={(d) => save.mutate({ title: "Tribute exercise", body: summarize(d), data: d })} />;
+  if (isLoading) return <SectionSkeleton height="h-64" />;
+  return (
+    <TributeForm
+      initial={(entry?.data as TributeData | null) ?? {}}
+      onSave={(d) => save.mutate({ title: "Tribute exercise", body: summarize(d), data: d })}
+      saving={save.isPending}
+      saved={save.isSuccess}
+    />
+  );
 }
 
 function summarize(d: TributeData) {
@@ -47,34 +106,54 @@ function summarize(d: TributeData) {
     .join("\n");
 }
 
-function TributeForm({ initial, onSave }: { initial: TributeData; onSave: (d: TributeData) => void }) {
+function TributeForm({
+  initial,
+  onSave,
+  saving,
+  saved,
+}: {
+  initial: TributeData;
+  onSave: (d: TributeData) => void;
+  saving: boolean;
+  saved: boolean;
+}) {
   const [d, setD] = useState<TributeData>(initial);
   const pending = useAutosave(d, onSave, 1000);
   const set = (speaker: string, lens: string, value: string) => setD({ ...d, [speaker]: { ...d[speaker], [lens]: value } });
   return (
-    <section className="rounded-2xl border bg-card p-4 sm:p-6">
-      <div className="mb-4 max-w-3xl space-y-2">
-        <h2 className="compass-display text-2xl">The end in mind</h2>
-        <p className="compass-text text-muted-foreground">{FUNERAL_EXERCISE.intro}</p>
-        <p className="text-sm text-muted-foreground">Take your time. There are no right answers, and this autosaves {pending ? "(saving…)" : ""}.</p>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
+    <ExerciseSection
+      title="The end in mind"
+      lede={
+        <>
+          <p className="voice max-w-[65ch] text-foreground">{FUNERAL_EXERCISE.intro}</p>
+          <p className="mt-2">Take your time. There are no right answers, and this autosaves.</p>
+        </>
+      }
+      // The lede already says it autosaves: the status stays hidden (its space kept) until a save starts.
+      aside={<SaveStatus saving={pending || saving} label={saved ? "Saved" : ""} className={cn(!pending && !saving && !saved && "opacity-0")} />}
+    >
+      <div className="grid grid-cols-1 gap-x-10 gap-y-8 lg:grid-cols-2">
         {FUNERAL_EXERCISE.speakers.map((s) => (
-          <div key={s.key} className="space-y-2 rounded-xl bg-muted/40 p-3">
-            <div className="text-sm font-semibold">{s.label}</div>
-            {FUNERAL_EXERCISE.lenses.map((l) => (
-              <div key={l.key} className="grid gap-1">
-                <Label className="text-xs text-muted-foreground">
-                  {l.label}: {l.prompt}
-                </Label>
-                <Textarea rows={2} value={d[s.key]?.[l.key] ?? ""} onChange={(e) => set(s.key, l.key, e.target.value)} className="compass-text !text-sm" />
-              </div>
-            ))}
+          <div key={s.key} className="space-y-4">
+            <h3 className="text-sm font-semibold text-foreground">{s.label}</h3>
+            {FUNERAL_EXERCISE.lenses.map((l) => {
+              const fieldId = `tribute-${s.key}-${l.key}`;
+              return (
+                <div key={l.key} className="grid gap-1.5">
+                  <Label size="sm" htmlFor={fieldId} className="block">
+                    <span className="text-foreground">{l.label}:</span> {l.prompt}
+                  </Label>
+                  <Textarea id={fieldId} voice="sm" rows={2} value={d[s.key]?.[l.key] ?? ""} onChange={(e) => set(s.key, l.key, e.target.value)} />
+                </div>
+              );
+            })}
           </div>
         ))}
       </div>
-      <p className="compass-text mt-4 max-w-3xl !text-[0.95rem] text-muted-foreground italic">{FUNERAL_EXERCISE.outro}</p>
-    </section>
+      <PrincipleNote icon={<Compass />} className="mt-10">
+        {FUNERAL_EXERCISE.outro}
+      </PrincipleNote>
+    </ExerciseSection>
   );
 }
 
@@ -94,7 +173,7 @@ function FreeWrite() {
     },
     { invalidate: false },
   );
-  useAutosave(text, (t) => t.trim() && save.mutate(t), 1500);
+  const pending = useAutosave(text, (t) => t.trim() && save.mutate(t), 1500);
   const { data: past = [] } = useQuery(journalQuery({ kind: "freewrite", limit: 5 }));
 
   useEffect(() => {
@@ -109,57 +188,73 @@ function FreeWrite() {
   const ss = String(seconds % 60).padStart(2, "0");
 
   return (
-    <section className="rounded-2xl border bg-card p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="max-w-2xl space-y-1">
-          <h2 className="compass-display text-2xl">Free-write for fifteen minutes</h2>
-          <p className="text-sm text-muted-foreground">Keep your pen moving until the timer ends. Don&apos;t edit. Use the three lenses below as prompts, then shape a rough draft of your mission from what comes out.</p>
-        </div>
+    <ExerciseSection
+      title="Free-write for fifteen minutes"
+      measure
+      lede="Keep your pen moving until the timer ends. Don't edit. Use the three lenses below as prompts, then shape a rough draft of your mission from what comes out."
+      aside={
         <div className="flex items-center gap-2">
-          <span className={cn("font-mono text-2xl tabular-nums", seconds === 0 && "text-primary")}>
+          <span className={cn("mr-2 text-3xl font-semibold tabular-nums", seconds === 0 ? "text-primary-ink" : "text-foreground")}>
             {mm}:{ss}
           </span>
-          <Button variant="outline" size="icon" onClick={() => setRunning((r) => !r)} aria-label={running ? "Pause" : "Start"}>
-            {running ? <Pause /> : <Play />}
-          </Button>
-          <Button
-            variant="ghost"
+          <IconButton
+            label={running ? "Pause" : "Start"}
+            icon={running ? <Pause /> : <Play />}
+            variant="outline"
             size="icon"
-            aria-label="New session"
+            onClick={() => setRunning((r) => !r)}
+          />
+          <IconButton
+            label="New session"
+            icon={<RotateCcw />}
+            size="icon"
+            className="-mr-2"
             onClick={() => {
               setRunning(false);
               setSeconds(15 * 60);
               setText("");
               idRef.current = null;
             }}
-          >
-            <RotateCcw />
-          </Button>
+          />
         </div>
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      }
+    >
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {MISSION_FREEWRITE_LENSES.map((l) => (
-          <div key={l.key} className="rounded-lg bg-muted/40 px-3 py-2 text-sm">
-            <div className="text-xs font-semibold text-muted-foreground uppercase">{l.label}</div>
-            {l.prompt}
+          <div key={l.key} className="border-t border-border-subtle pt-3">
+            <div className="text-xs font-medium text-muted-foreground">{l.label}</div>
+            <p className="mt-1 text-sm text-foreground">{l.prompt}</p>
           </div>
         ))}
       </div>
-      <Textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} onFocus={() => !running && seconds === 15 * 60 && setRunning(true)} className="compass-text mt-3" placeholder="Start writing; the timer starts when you do." />
+      <Textarea
+        voice="md"
+        rows={8}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onFocus={() => !running && seconds === 15 * 60 && setRunning(true)}
+        className="mt-6 min-h-60"
+        aria-label="Free-write"
+        placeholder="Start writing; the timer starts when you do."
+      />
+      <SaveStatus saving={pending || save.isPending} label={save.isSuccess ? "Saved" : AUTOSAVES} className="mt-2" />
       {past.length > 0 && (
-        <details className="mt-3 text-sm">
-          <summary className="cursor-pointer text-muted-foreground">Previous sessions ({past.length})</summary>
-          <ul className="mt-2 space-y-2">
+        <details className="group/past mt-6">
+          <summary className="-mx-2 inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg px-2 py-1 text-sm font-medium text-muted-foreground transition-colors duration-120 select-none hover:bg-subtle hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <ChevronRight aria-hidden className="size-4 transition-transform duration-180 ease-out group-open/past:rotate-90" />
+            Previous sessions <span className="font-normal tabular-nums">({past.length})</span>
+          </summary>
+          <ul className="mt-4 space-y-5">
             {past.map((p) => (
-              <li key={p.id} className="rounded-lg bg-muted/40 p-3">
-                <div className="text-xs text-muted-foreground">{fmtDate(p.date, "d MMM yyyy")}</div>
-                <div className="compass-text line-clamp-4 !text-sm whitespace-pre-wrap">{p.body}</div>
+              <li key={p.id} className="border-l-2 border-border-strong pl-4">
+                <div className="text-xs text-muted-foreground tabular-nums">{fmtDate(p.date, "d MMM yyyy")}</div>
+                <p className="voice-sm mt-1 line-clamp-4 max-w-[65ch] whitespace-pre-wrap text-foreground">{p.body}</p>
               </li>
             ))}
           </ul>
         </details>
       )}
-    </section>
+    </ExerciseSection>
   );
 }
 
@@ -167,26 +262,48 @@ function FreeWrite() {
 
 function Questions() {
   const { entry, isLoading, save } = useSingletonEntry("mission_q");
-  if (isLoading) return <Skeleton className="h-48" />;
-  return <QuestionsForm initial={(entry?.data as Record<string, string> | null) ?? {}} onSave={(d) => save.mutate({ title: "Mission questions", body: MISSION_QUESTIONS.map((q, i) => (d[i] ? `${q}\n${d[i]}` : "")).filter(Boolean).join("\n\n"), data: d })} />;
+  if (isLoading) return <SectionSkeleton height="h-48" />;
+  return (
+    <QuestionsForm
+      initial={(entry?.data as Record<string, string> | null) ?? {}}
+      onSave={(d) => save.mutate({ title: "Mission questions", body: MISSION_QUESTIONS.map((q, i) => (d[i] ? `${q}\n${d[i]}` : "")).filter(Boolean).join("\n\n"), data: d })}
+      saving={save.isPending}
+      saved={save.isSuccess}
+    />
+  );
 }
 
-function QuestionsForm({ initial, onSave }: { initial: Record<string, string>; onSave: (d: Record<string, string>) => void }) {
+function QuestionsForm({
+  initial,
+  onSave,
+  saving,
+  saved,
+}: {
+  initial: Record<string, string>;
+  onSave: (d: Record<string, string>) => void;
+  saving: boolean;
+  saved: boolean;
+}) {
   const [d, setD] = useState(initial);
   const pending = useAutosave(d, onSave, 1000);
   return (
-    <section className="rounded-2xl border bg-card p-4 sm:p-6">
-      <h2 className="compass-display text-2xl">Questions for a quiet hour</h2>
-      <p className="mb-4 text-sm text-muted-foreground">Take these somewhere that inspires you. Answer the ones that pull at you {pending ? "(saving…)" : ""}.</p>
-      <div className="grid gap-4 md:grid-cols-2">
+    <ExerciseSection
+      title="Questions for a quiet hour"
+      lede="Take these somewhere that inspires you. Answer the ones that pull at you."
+      aside={<SaveStatus saving={pending || saving} label={saved ? "Saved" : AUTOSAVES} />}
+    >
+      {/* Each question spans two rows of a shared grid (subgrid), so the fields line up across columns whatever the question's length. */}
+      <div className="grid grid-cols-1 gap-x-10 gap-y-8 md:grid-cols-2">
         {MISSION_QUESTIONS.map((q, i) => (
-          <div key={q} className="grid content-start gap-1.5">
-            <Label className="compass-text !text-[0.95rem] leading-snug">{q}</Label>
-            <Textarea rows={3} value={d[i] ?? ""} onChange={(e) => setD({ ...d, [i]: e.target.value })} className="!text-sm" />
+          <div key={q} className="grid content-start gap-2 md:row-span-2 md:grid-rows-subgrid">
+            <label htmlFor={`mission-q-${i}`} className="voice-sm self-end text-foreground">
+              {q}
+            </label>
+            <Textarea id={`mission-q-${i}`} rows={3} value={d[i] ?? ""} onChange={(e) => setD({ ...d, [i]: e.target.value })} />
           </div>
         ))}
       </div>
-    </section>
+    </ExerciseSection>
   );
 }
 
@@ -204,36 +321,35 @@ function Resources() {
   });
   const remove = useApiMutation((id: string) => call(api.journal[":id"].$delete({ param: { id } })));
   return (
-    <section className="rounded-2xl border bg-card p-4 sm:p-6">
-      <h2 className="compass-display text-2xl">Quotes, notes and ideas</h2>
-      <p className="mb-3 text-sm text-muted-foreground">Collect what resonates: raw material for your mission.</p>
+    <ExerciseSection title="Quotes, notes and ideas" lede="Collect what resonates: raw material for your mission.">
       <form
-        className="grid gap-2 sm:grid-cols-[1fr_12rem_auto]"
+        className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_auto]"
         onSubmit={(e) => {
           e.preventDefault();
           if (text.trim()) add.mutate(undefined);
         }}
       >
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="A line, a quote, an idea" />
-        <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Source (optional)" />
-        <Button type="submit" variant="outline" disabled={!text.trim()}>
+        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="A line, a quote, an idea" aria-label="Quote, note or idea" />
+        <Input value={source} onChange={(e) => setSource(e.target.value)} placeholder="Source (optional)" aria-label="Source" />
+        <Button type="submit" variant="outline" disabled={!text.trim()} pending={add.isPending}>
           <Plus /> Keep
         </Button>
       </form>
-      <ul className="mt-3 grid gap-2 md:grid-cols-2">
-        {data.map((r) => (
-          <li key={r.id} className="group flex gap-2 rounded-lg bg-muted/40 p-3">
-            <Quote className="mt-0.5 size-4 shrink-0 text-primary" />
-            <div className="min-w-0 flex-1">
-              <div className="compass-text !text-[0.95rem]">{r.body}</div>
-              {r.title && <div className="text-xs text-muted-foreground">{r.title}</div>}
-            </div>
-            <Button variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100" onClick={() => remove.mutate(r.id)} aria-label="Remove">
-              <Trash2 />
-            </Button>
-          </li>
-        ))}
-      </ul>
-    </section>
+      {data.length > 0 && (
+        <ul className="mt-8 grid grid-cols-1 gap-x-10 gap-y-6 md:grid-cols-2">
+          {data.map((r) => (
+            <li key={r.id} className="group/row flex items-start gap-3 border-l-2 border-border-strong py-1 pl-4">
+              <div className="min-w-0 flex-1">
+                <p className="voice-sm text-foreground italic">{r.body}</p>
+                {r.title && <p className="mt-1 text-xs text-muted-foreground">{r.title}</p>}
+              </div>
+              <RowActions>
+                <IconButton label="Remove" icon={<Trash2 />} size="icon-xs" onClick={() => remove.mutate(r.id)} />
+              </RowActions>
+            </li>
+          ))}
+        </ul>
+      )}
+    </ExerciseSection>
   );
 }

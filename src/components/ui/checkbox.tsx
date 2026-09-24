@@ -1,23 +1,37 @@
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox"
 import { cn } from "cn"
-import { CheckIcon } from "lucide-react"
+
+/**
+ * The tick draws itself in (stroke-dashoffset 1 → 0). Base UI applies data-starting-style
+ * only when the indicator mounts on a click, so boxes loaded as checked never animate.
+ */
+function CheckboxTick() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-3.5" aria-hidden>
+      <path
+        d="M5 12.5l4.5 4.5L19 7.5"
+        pathLength={1}
+        className="stroke-current [stroke-width:3] [stroke-linecap:round] [stroke-linejoin:round] [stroke-dasharray:1] [stroke-dashoffset:0] transition-[stroke-dashoffset] duration-180 ease-out in-data-starting-style:[stroke-dashoffset:1]"
+      />
+    </svg>
+  )
+}
 
 function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
   return (
     <CheckboxPrimitive.Root
       data-slot="checkbox"
       className={cn(
-        "peer relative flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input transition-colors outline-none group-has-disabled/field:opacity-50 group-has-[:focus-visible]/field-label:ring-0 group-has-[:focus-visible]/field-label:not-data-checked:border-input after:absolute after:-inset-x-3 after:-inset-y-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 aria-invalid:aria-checked:border-primary dark:bg-input/30 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 data-checked:border-primary data-checked:bg-primary data-checked:text-primary-foreground group-has-[:focus-visible]/field-label:data-checked:border-primary dark:data-checked:bg-primary",
+        "peer relative grid size-4.5 shrink-0 place-items-center rounded-xs border-[1.5px] border-control bg-field text-primary-foreground transition-[background-color,border-color] duration-120 ease-out after:absolute after:-inset-2.5 pointer-coarse:after:-inset-3.5 data-checked:border-primary data-checked:bg-primary aria-invalid:border-destructive data-disabled:cursor-not-allowed data-disabled:opacity-45",
         className
       )}
       {...props}
     >
       <CheckboxPrimitive.Indicator
         data-slot="checkbox-indicator"
-        className="grid place-content-center text-current transition-none [&>svg]:size-3.5"
+        className="grid place-items-center text-current"
       >
-        <CheckIcon
-        />
+        <CheckboxTick />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

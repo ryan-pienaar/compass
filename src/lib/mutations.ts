@@ -83,6 +83,7 @@ export function useToggleDone() {
           if (next === "done") {
             toast.success(`Done: ${task.title}`, {
               action: { label: "Undo", onClick: () => update.mutate({ id: task.id, status: "open" }) },
+              duration: 10_000,
             });
           }
         },

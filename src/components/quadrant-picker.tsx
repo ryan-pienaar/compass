@@ -1,8 +1,21 @@
 import { QUADRANTS, type Quadrant } from "@shared/quadrant.ts";
 import { cn } from "@/lib/utils";
-import { QUADRANT_CLASSES } from "./badges";
+import { QuadrantDot } from "./badges";
 
-/** 2x2 picker laid out like the matrix: urgent on the left, important on top. */
+/** The pressed ring and tint per quadrant (literal strings so Tailwind generates them). Q3 tints a little stronger to read on paper. In dark the tint mixes into the lifted tile (bg-muted), so the pressed tile never sinks. */
+const PRESSED: Record<Quadrant, string> = {
+  1: "aria-pressed:bg-q1/12 aria-pressed:ring-q1 dark:aria-pressed:bg-[color-mix(in_oklab,var(--q1)_12%,var(--muted))]",
+  2: "aria-pressed:bg-q2/12 aria-pressed:ring-q2 dark:aria-pressed:bg-[color-mix(in_oklab,var(--q2)_12%,var(--muted))]",
+  3: "aria-pressed:bg-q3/16 aria-pressed:ring-q3 dark:aria-pressed:bg-[color-mix(in_oklab,var(--q3)_16%,var(--muted))]",
+  4: "aria-pressed:bg-q4/12 aria-pressed:ring-q4 dark:aria-pressed:bg-[color-mix(in_oklab,var(--q4)_12%,var(--muted))]",
+};
+
+const axis = "text-2xs font-medium text-muted-foreground";
+
+/**
+ * 2x2 picker laid out like the matrix: urgent on the left, important on top. The axis labels
+ * show from `sm` up; below that each option's own label carries the meaning.
+ */
 export function QuadrantPicker({
   value,
   onChange,
@@ -15,39 +28,39 @@ export function QuadrantPicker({
   className?: string;
 }) {
   return (
-    <div className={cn("inline-grid grid-cols-[auto_1fr_1fr] gap-1 text-xs", className)}>
-      <span />
-      <span className="px-1 text-center text-[10px] font-medium text-muted-foreground uppercase">Urgent</span>
-      <span className="px-1 text-center text-[10px] font-medium text-muted-foreground uppercase">Not urgent</span>
+    <div className={cn("grid grid-cols-2 gap-2 sm:grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)]", size === "default" && "sm:gap-x-3", className)}>
+      <span aria-hidden className="hidden sm:block" />
+      <span className={cn(axis, "hidden px-3 sm:block")}>
+        Urgent
+      </span>
+      <span className={cn(axis, "hidden px-3 sm:block")}>
+        Not urgent
+      </span>
       {([
         ["Important", [1, 2]],
         ["Not important", [3, 4]],
       ] as const).map(([rowLabel, qs]) => (
         <div key={rowLabel} className="contents">
-          <span className="flex items-center pr-1 text-[10px] font-medium text-muted-foreground uppercase [writing-mode:vertical-rl] rotate-180 sm:[writing-mode:initial] sm:rotate-0">
+          <span className={cn(axis, "hidden self-center pr-1 sm:block")}>
             {rowLabel}
           </span>
           {qs.map((q) => {
             const info = QUADRANTS[q];
-            const c = QUADRANT_CLASSES[q];
-            const active = value === q;
             return (
               <button
                 key={q}
                 type="button"
                 onClick={() => onChange(q)}
-                aria-pressed={active}
+                aria-pressed={value === q}
                 className={cn(
-                  "flex flex-col items-start rounded-lg border text-left transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                  size === "sm" ? "min-w-24 px-2 py-1.5" : "min-w-32 px-3 py-2",
-                  active ? cn(c.bg, c.border, "ring-2", c.ring) : "border-border hover:bg-muted",
+                  "flex min-h-14 min-w-0 flex-col items-start justify-center gap-0.5 rounded-lg bg-card px-3 py-2 text-left ring-1 ring-edge dark:bg-muted transition-[box-shadow,background-color] duration-120 ease-out not-aria-pressed:hover:ring-border-strong aria-pressed:ring-2",
+                  PRESSED[q],
                 )}
               >
-                <span className="flex items-center gap-1.5 font-semibold">
-                  <span aria-hidden className={cn("size-2 rounded-full", c.solid)} />
-                  Q{info.numeral} · {info.verb}
+                <span className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                  <QuadrantDot q={q} />Q{info.numeral} · {info.verb}
                 </span>
-                {size === "default" && <span className="text-[11px] text-muted-foreground">{info.label}</span>}
+                <span className="text-xs text-muted-foreground">{info.label}</span>
               </button>
             );
           })}

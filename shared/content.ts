@@ -59,6 +59,9 @@ export const ROLE_COLORS = [
   "#b45309", // amber-brown
 ];
 
+/** The Sharpen the Saw role's colour. Mirrors the server default (`server/db/schema.ts`); data, not a theme token. */
+export const SAW_ROLE_COLOR = "#0f766e";
+
 /** Soft limit: seven or so roles keeps a week manageable. */
 export const RECOMMENDED_MAX_ROLES = 7;
 

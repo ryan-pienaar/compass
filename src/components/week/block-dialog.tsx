@@ -1,7 +1,8 @@
 import { ExternalLink, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { Quadrant } from "@shared/quadrant.ts";
 import { useAppState } from "@/components/app-state";
+import { QuadrantDot } from "@/components/badges";
 import { DateField, RoleSelect } from "@/components/pickers";
 import { Segmented } from "@/components/segmented";
 import { Button } from "@/components/ui/button";
@@ -62,7 +63,7 @@ export function BlockDialog({
 }) {
   return (
     <Dialog open={!!draft} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="top-[8vh] translate-y-0 sm:max-w-md">
+      <DialogContent placement="top">
         {draft && (
           <BlockForm
             key={draft.id ?? `${draft.date}-${draft.startMin}`}
@@ -78,6 +79,28 @@ export function BlockDialog({
     </Dialog>
   );
 }
+
+/** Quadrant options: the numeral beside its colour dot (the dot never stands alone). */
+const QUADRANT_OPTIONS: { value: "1" | "2" | "3" | "4" | "none"; label: React.ReactNode }[] = [
+  ...([1, 2, 3, 4] as const).map((q) => ({
+    value: String(q) as "1" | "2" | "3" | "4",
+    label: (
+      <>
+        <QuadrantDot q={q} />
+        {["I", "II", "III", "IV"][q - 1]}
+      </>
+    ),
+  })),
+  {
+    value: "none",
+    label: (
+      <>
+        <span aria-hidden>–</span>
+        <span className="sr-only">None</span>
+      </>
+    ),
+  },
+];
 
 function BlockForm({
   initial,
@@ -96,6 +119,7 @@ function BlockForm({
 }) {
   const { openTask } = useAppState();
   const [d, setD] = useState<BlockDraft>(initial);
+  const id = useId();
   const lo = Math.min(dayStartHour * 60, d.startMin);
   const hi = Math.max(dayEndHour * 60, d.endMin);
   const times = [];
@@ -104,7 +128,7 @@ function BlockForm({
 
   return (
     <form
-      className="grid gap-4"
+      className="grid gap-5"
       onSubmit={(e) => {
         e.preventDefault();
         if (valid) onSave(d);
@@ -116,115 +140,145 @@ function BlockForm({
           {d.kind === "focus" ? "Time reserved for something that matters to you." : "A commitment with other people or a fixed event."}
         </DialogDescription>
       </DialogHeader>
-      {d.taskId ? (
-        <div className="flex items-center justify-between gap-2 rounded-lg bg-muted px-3 py-2 text-sm">
-          <span className="truncate">
-            For: <span className="font-medium">{d.taskTitle ?? d.title}</span>
-          </span>
-          <Button type="button" variant="ghost" size="xs" onClick={() => openTask(d.taskId!)}>
-            <ExternalLink /> Open
-          </Button>
-        </div>
-      ) : null}
-      <div className="grid gap-1.5">
-        <Label htmlFor="block-title">Title</Label>
-        <Input id="block-title" value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder="e.g. Dentist, Team meeting" autoFocus={!d.taskId} />
-      </div>
-      <div className="grid grid-cols-[1fr_auto_auto] items-end gap-2">
+      <div className="grid gap-4">
+        {d.taskId ? (
+          <div className="-my-1 flex min-w-0 items-center gap-2 text-sm">
+            <span className="min-w-0 flex-1 truncate">
+              <span className="text-muted-foreground">For: </span>
+              <span className="font-medium">{d.taskTitle ?? d.title}</span>
+            </span>
+            <Button type="button" variant="ghost" size="xs" className="-mr-2.5" onClick={() => openTask(d.taskId!)}>
+              <ExternalLink /> Open
+            </Button>
+          </div>
+        ) : null}
         <div className="grid gap-1.5">
-          <Label>Day</Label>
-          <DateField value={d.date} onChange={(date) => date && setD({ ...d, date })} clearable={false} size="sm" />
-        </div>
-        <TimeSelect label="From" value={d.startMin} times={times.slice(0, -1)} onChange={(startMin) => setD({ ...d, startMin, endMin: Math.max(d.endMin, startMin + 15) })} />
-        <TimeSelect label="To" value={d.endMin} times={times.filter((t) => t > d.startMin)} onChange={(endMin) => setD({ ...d, endMin })} />
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Label>Kind</Label>
-          <Segmented
-            size="sm"
-            value={d.kind}
-            onChange={(kind) => setD({ ...d, kind })}
-            options={[
-              { value: "focus", label: "Focus" },
-              { value: "appointment", label: "Appointment" },
-            ]}
+          <Label size="sm" htmlFor={`${id}-title`}>
+            Title
+          </Label>
+          <Input
+            id={`${id}-title`}
+            value={d.title}
+            onChange={(e) => setD({ ...d, title: e.target.value })}
+            placeholder="e.g. Dentist, Team meeting"
+            autoFocus={!d.taskId}
           />
         </div>
-        <div className="grid gap-1.5">
-          <Label>Role</Label>
-          <RoleSelect value={d.roleId} onChange={(roleId) => setD({ ...d, roleId })} size="sm" className="w-full" />
-        </div>
-      </div>
-      {!d.taskId && (
-        <div className="grid gap-1.5">
-          <Label>Quadrant</Label>
-          <Segmented<"1" | "2" | "3" | "4" | "none">
-            size="sm"
-            value={d.quadrant ? (String(d.quadrant) as "1") : "none"}
-            onChange={(v) => setD({ ...d, quadrant: v === "none" ? null : (Number(v) as Quadrant) })}
-            options={[
-              { value: "1", label: "I" },
-              { value: "2", label: "II" },
-              { value: "3", label: "III" },
-              { value: "4", label: "IV" },
-              { value: "none", label: "–" },
-            ]}
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-end gap-2">
+          <div className="grid min-w-0 gap-1.5">
+            <Label size="sm" htmlFor={`${id}-day`}>
+              Day
+            </Label>
+            <DateField id={`${id}-day`} value={d.date} onChange={(date) => date && setD({ ...d, date })} clearable={false} />
+          </div>
+          <TimeSelect
+            id={`${id}-from`}
+            label="From"
+            value={d.startMin}
+            times={times.slice(0, -1)}
+            onChange={(startMin) => setD({ ...d, startMin, endMin: Math.max(d.endMin, startMin + 15) })}
           />
+          <TimeSelect id={`${id}-to`} label="To" value={d.endMin} times={times.filter((t) => t > d.startMin)} onChange={(endMin) => setD({ ...d, endMin })} />
         </div>
-      )}
-      {initial.id && (
-        <div className="grid gap-1.5">
-          <Label>How did it go?</Label>
-          <Segmented
-            size="sm"
-            value={d.status}
-            onChange={(status) => setD({ ...d, status })}
-            options={[
-              { value: "planned", label: "Planned" },
-              { value: "done", label: "Done" },
-              { value: "skipped", label: "Didn't happen" },
-            ]}
-          />
+        <div className="grid gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-3">
+          <div className="grid gap-1.5">
+            <Label size="sm" id={`${id}-kind`}>
+              Kind
+            </Label>
+            <Segmented
+              aria-labelledby={`${id}-kind`}
+              className="w-full [&>button]:flex-auto"
+              value={d.kind}
+              onChange={(kind) => setD({ ...d, kind })}
+              options={[
+                { value: "focus", label: "Focus" },
+                { value: "appointment", label: "Appointment" },
+              ]}
+            />
+          </div>
+          <div className="grid gap-1.5">
+            <Label size="sm" htmlFor={`${id}-role`}>
+              Role
+            </Label>
+            <RoleSelect id={`${id}-role`} value={d.roleId} onChange={(roleId) => setD({ ...d, roleId })} className="w-full" />
+          </div>
         </div>
-      )}
-      <div className="grid gap-1.5">
-        <Label>Notes</Label>
-        <Textarea rows={2} value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} />
-      </div>
-      <DialogFooter className="sm:justify-between">
-        {initial.id ? (
-          <Button type="button" variant="ghost" className="text-destructive" onClick={() => onDelete(initial.id!)}>
-            <Trash2 /> Remove
-          </Button>
-        ) : (
-          <span />
+        {!d.taskId && (
+          <div className="grid gap-1.5">
+            <Label size="sm" id={`${id}-quadrant`}>
+              Quadrant
+            </Label>
+            <Segmented<"1" | "2" | "3" | "4" | "none">
+              aria-labelledby={`${id}-quadrant`}
+              className="w-full [&>button]:flex-1"
+              value={d.quadrant ? (String(d.quadrant) as "1") : "none"}
+              onChange={(v) => setD({ ...d, quadrant: v === "none" ? null : (Number(v) as Quadrant) })}
+              options={QUADRANT_OPTIONS}
+            />
+          </div>
         )}
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={!valid}>
-            Save
-          </Button>
+        {initial.id && (
+          <div className="grid gap-1.5">
+            <Label size="sm" id={`${id}-status`}>
+              How did it go?
+            </Label>
+            <Segmented
+              aria-labelledby={`${id}-status`}
+              className="w-full [&>button]:flex-auto"
+              value={d.status}
+              onChange={(status) => setD({ ...d, status })}
+              options={[
+                { value: "planned", label: "Planned" },
+                { value: "done", label: "Done" },
+                { value: "skipped", label: "Didn't happen" },
+              ]}
+            />
+          </div>
+        )}
+        <div className="grid gap-1.5">
+          <Label size="sm" htmlFor={`${id}-notes`}>
+            Notes
+          </Label>
+          <Textarea id={`${id}-notes`} rows={2} value={d.notes} onChange={(e) => setD({ ...d, notes: e.target.value })} />
         </div>
+      </div>
+      <DialogFooter
+        start={
+          initial.id ? (
+            <Button type="button" variant="destructive-ghost" className="-ml-3" onClick={() => onDelete(initial.id!)}>
+              <Trash2 /> Remove
+            </Button>
+          ) : null
+        }
+      >
+        <Button type="button" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button type="submit" disabled={!valid}>
+          Save
+        </Button>
       </DialogFooter>
     </form>
   );
 }
 
-function TimeSelect({ label, value, times, onChange }: { label: string; value: number; times: number[]; onChange: (m: number) => void }) {
+function TimeSelect({ id, label, value, times, onChange }: { id: string; label: string; value: number; times: number[]; onChange: (m: number) => void }) {
   const items = times.map((t) => ({ value: String(t), label: formatMinutes(t) }));
+  // A block that ends off the 15-minute grid (06:40) still shows its time on the trigger, not "400".
+  // Label lookup only: the list itself is unchanged.
+  const labels = items.some((it) => it.value === String(value)) ? items : [...items, { value: String(value), label: formatMinutes(value) }];
   return (
     <div className="grid gap-1.5">
-      <Label>{label}</Label>
-      <Select items={items} value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-        <SelectTrigger size="sm" className="w-24">
+      <Label size="sm" htmlFor={id}>
+        {label}
+      </Label>
+      <Select items={labels} value={String(value)} onValueChange={(v) => onChange(Number(v))}>
+        <SelectTrigger id={id} className="w-24 tabular-nums">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {items.map((it) => (
-            <SelectItem key={it.value} value={it.value}>
+            <SelectItem key={it.value} value={it.value} className="tabular-nums">
               {it.label}
             </SelectItem>
           ))}

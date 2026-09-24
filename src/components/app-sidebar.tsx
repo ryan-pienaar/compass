@@ -1,5 +1,6 @@
 import { Link, useLocation } from "@tanstack/react-router";
-import { CalendarCheck, Compass, LogOut, Monitor, Moon, Plus, Settings, Sun, UserRound } from "lucide-react";
+import { CalendarCheck, LogOut, Monitor, Moon, Plus, Settings, Sun, UserRound } from "lucide-react";
+import { BrandMark } from "@/components/brand-mark";
 import { useTheme } from "@/components/theme";
 import {
   DropdownMenu,
@@ -26,6 +27,7 @@ import {
   SidebarRail,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Kbd } from "@/components/ui/kbd";
 import { api, call } from "@/lib/api";
 import { useAccount } from "@/lib/auth";
 import { formatWeekRange } from "@/lib/format";
@@ -42,37 +44,35 @@ export function AppSidebar() {
   const { setOpenMobile, isMobile } = useSidebar();
   const closeOnMobile = () => isMobile && setOpenMobile(false);
 
-  const badgeFor = (to: string) => {
-    if (to === "/tasks" && counts.inbox > 0) return counts.inbox;
-    if (to === "/stewardships" && counts.checkinsDue > 0) return counts.checkinsDue;
+  // Inbox is a plain count; a due check-in is an invitation, so it gets the attention tone.
+  const badgeFor = (to: string): { count: number; attention: boolean } | null => {
+    if (to === "/tasks" && counts.inbox > 0) return { count: counts.inbox, attention: false };
+    if (to === "/stewardships" && counts.checkinsDue > 0) return { count: counts.checkinsDue, attention: true };
     return null;
   };
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="gap-3">
-        <div className="flex items-center gap-2 px-1 pt-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
-          <div className="grid size-8 shrink-0 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Compass className="size-4.5" />
-          </div>
-          <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-            <div className="text-sm leading-tight font-semibold">Compass</div>
-            <div className="truncate text-xs text-muted-foreground">Put first things first</div>
-          </div>
-        </div>
-        <SidebarMenu>
+        <BrandMark
+          size="sm"
+          withName
+          className="px-1 pt-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 group-data-[collapsible=icon]:*:data-[slot=brand-mark-name]:hidden"
+        />
+        <SidebarMenu className="gap-2">
           <SidebarMenuItem>
             <SidebarMenuButton
+              variant="outline"
               tooltip="Capture (N)"
               onClick={() => {
                 closeOnMobile();
                 openCapture();
               }}
-              className="border bg-background shadow-xs hover:bg-muted"
+              className="h-9"
             >
               <Plus />
               <span>Capture</span>
-              <kbd className="ml-auto rounded border px-1 text-[10px] text-muted-foreground group-data-[collapsible=icon]:hidden">N</kbd>
+              <Kbd className="ml-auto group-data-[collapsible=icon]:hidden">N</Kbd>
             </SidebarMenuButton>
           </SidebarMenuItem>
           {planTarget && (
@@ -81,12 +81,12 @@ export function AppSidebar() {
                 tooltip="Plan your week"
                 render={<Link to="/plan/$start" params={{ start: planTarget }} onClick={closeOnMobile} />}
                 isActive={pathname.startsWith("/plan")}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground data-active:bg-primary/90 data-active:text-primary-foreground"
+                className="h-auto min-h-12 items-start rounded-lg bg-primary-soft px-2.5 py-2 text-primary-soft-foreground pointer-coarse:h-auto hover:bg-[color-mix(in_oklab,var(--primary-soft),var(--primary)_12%)] hover:text-primary-soft-foreground data-active:bg-[color-mix(in_oklab,var(--primary-soft),var(--primary)_12%)] data-active:hover:bg-[color-mix(in_oklab,var(--primary-soft),var(--primary)_12%)] data-active:text-primary-soft-foreground data-active:shadow-none data-active:ring-0 group-data-[collapsible=icon]:min-h-0 [&>svg]:mt-0.5 [&>svg]:text-primary-soft-foreground data-active:[&>svg]:text-primary-soft-foreground group-data-[collapsible=icon]:[&>svg]:mt-0"
               >
                 <CalendarCheck />
-                <span className="flex min-w-0 flex-col leading-tight">
-                  <span>Plan your week</span>
-                  <span className="truncate text-[11px] opacity-80">
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-sm font-medium">Plan your week</span>
+                  <span className="truncate text-xs font-normal text-primary-ink">
                     {planTarget === weekStart ? "This week" : "Next week"} · {formatWeekRange(planTarget)}
                   </span>
                 </span>
@@ -113,7 +113,7 @@ export function AppSidebar() {
                       <item.icon />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
-                    {badge != null && <SidebarMenuBadge>{badge}</SidebarMenuBadge>}
+                    {badge != null && <SidebarMenuBadge attention={badge.attention}>{badge.count}</SidebarMenuBadge>}
                   </SidebarMenuItem>
                 );
               })}
@@ -122,7 +122,7 @@ export function AppSidebar() {
         ))}
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-border-subtle">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton tooltip="Settings" isActive={pathname === "/settings"} render={<Link to="/settings" onClick={closeOnMobile} />}>
@@ -184,7 +184,7 @@ function AccountItem() {
       <DropdownMenu>
         <DropdownMenuTrigger render={<SidebarMenuButton tooltip={account.name} />}>
           {account.picture ? (
-            <img src={account.picture} alt="" referrerPolicy="no-referrer" className="size-4 shrink-0 rounded-full" />
+            <img src={account.picture} alt="" referrerPolicy="no-referrer" className="size-6 shrink-0 rounded-full ring-1 ring-edge group-data-[collapsible=icon]:-mx-1" />
           ) : (
             <UserRound />
           )}

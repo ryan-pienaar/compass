@@ -1,10 +1,16 @@
 import { useDraggable, useDroppable } from "@dnd-kit/react";
 import { pointerIntersection } from "@dnd-kit/collision";
-import { Check, GripVertical, Plus, Repeat } from "lucide-react";
-import { useState } from "react";
+import { Check, CircleDashed, GripVertical, Mountain, Repeat } from "lucide-react";
+import { Fragment, useState, type ReactNode } from "react";
 import { SAW_DIMENSIONS, type SawDimension } from "@shared/content.ts";
+import { GroupLabel } from "@/components/page";
 import { RoleDot } from "@/components/badges";
-import { Input } from "@/components/ui/input";
+import { Chip } from "@/components/chip";
+import { DoneCheck } from "@/components/done-check";
+import { QuickAdd } from "@/components/quick-add";
+import { MetaSep, RowMeta } from "@/components/row";
+import { boardCard, dragSource, dropZone, Well } from "@/components/surface";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Role, WeekBoard, WeekGoal } from "@/lib/api";
 import { fmtDate, formatDuration } from "@/lib/format";
 import { cardSensors } from "@/lib/dnd";
@@ -32,36 +38,48 @@ export function GoalTray({ board, draggingId, onAddGoal, onToggle, onOpen, class
   const inWeek = new Set(roles.map((r) => r.id));
   const orphans = board.goals.filter((g) => !g.roleId || !inWeek.has(g.roleId));
   const unscheduled = board.goals.filter((g) => g.status === "open" && g.blockCount === 0 && !g.scheduledDate).length;
+  // Dropping a block here deletes it, so that drop reads as destructive; a priority just goes back to the tray.
+  const removesBlock = isDropTarget && !!draggingId?.startsWith("block:");
 
   return (
-    <aside
+    <Well
+      as="aside"
       ref={ref}
+      aria-labelledby="week-tray-title"
       className={cn(
-        "flex min-h-0 flex-col rounded-xl border bg-card transition-colors",
-        isDropTarget && "bg-destructive/5 ring-2 ring-destructive/30",
+        "flex min-h-0 flex-col transition-[background-color,outline-color] duration-180 ease-out",
+        isDropTarget && dropZone("over", removesBlock ? "danger" : "primary"),
         className,
       )}
     >
-      <div className="flex items-center justify-between border-b px-3 py-2.5">
-        <div>
-          <div className="text-sm font-semibold">Roles & big rocks</div>
-          <div className="text-xs text-muted-foreground">
-            {isDropTarget ? "Drop to unschedule" : "Drag rocks onto a day or a time"}
-          </div>
+      <div className="px-2 pt-1 pb-3">
+        {/* In the 16rem tray (below 2xl) the status chip wraps under the title instead of truncating it. */}
+        <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <h2 id="week-tray-title" className="min-w-0 text-sm font-semibold text-foreground">
+            Roles & big rocks
+          </h2>
+          {board.goals.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  unscheduled ? (
+                    <Chip tone="neutral" icon={<CircleDashed aria-hidden />} className="tabular-nums" />
+                  ) : (
+                    <Chip tone="success" icon={<Check aria-hidden />} />
+                  )
+                }
+              >
+                {unscheduled ? `${unscheduled} not placed` : "All placed"}
+              </TooltipTrigger>
+              <TooltipContent>Rocks without a day or time yet</TooltipContent>
+            </Tooltip>
+          )}
         </div>
-        {board.goals.length > 0 && (
-          <span
-            className={cn(
-              "rounded-full px-2 py-0.5 text-[11px] font-semibold",
-              unscheduled ? "bg-warning/15 text-warning" : "bg-success/15 text-success",
-            )}
-            title="Rocks without a day or time yet"
-          >
-            {unscheduled ? `${unscheduled} unscheduled` : "All placed"}
-          </span>
-        )}
+        <p className="text-xs text-muted-foreground">{isDropTarget ? "Drop to unschedule" : "Drag rocks onto a day or a time"}</p>
       </div>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3 scrollbar-thin">
+      {/* The scroller reaches the well's edges and pads itself, so card hairlines and focus rings aren't clipped.
+          `relative` keeps absolutely positioned descendants (sr-only text) inside it, so they never stretch the page. */}
+      <div className="relative -mx-2 -mb-2 min-h-0 flex-1 scroll-fade-y space-y-5 overflow-y-auto px-2 pb-2 scrollbar-thin">
         {roles.map((role) =>
           role.isSaw ? (
             <SawSection key={role.id} role={role} goals={board.goals.filter((g) => g.roleId === role.id)} {...{ draggingId, onAddGoal, onToggle, onOpen }} />
@@ -70,15 +88,34 @@ export function GoalTray({ board, draggingId, onAddGoal, onToggle, onOpen, class
           ),
         )}
         {orphans.length > 0 && (
-          <section className="space-y-1.5">
-            <div className="text-xs font-semibold text-muted-foreground">Other</div>
-            {orphans.map((g) => (
-              <GoalCard key={g.id} goal={g} role={undefined} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
-            ))}
+          <section>
+            <GroupLabel label="Other" count={orphans.length} className="px-2" />
+            <div className="flex flex-col gap-1.5">
+              {orphans.map((g) => (
+                <GoalCard key={g.id} goal={g} role={undefined} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
+              ))}
+            </div>
           </section>
         )}
       </div>
-    </aside>
+    </Well>
+  );
+}
+
+/** A role's heading in the tray: dot and name, then the count or a quiet "no rock yet". */
+function RoleLabel({ role, count, hint }: { role: Role; count?: number; hint?: ReactNode }) {
+  return (
+    <GroupLabel
+      className="items-center px-2"
+      label={
+        <span className="flex min-w-0 items-center gap-2">
+          <RoleDot color={role.color} />
+          <span className="truncate">{role.name}</span>
+        </span>
+      }
+      hint={hint}
+      count={count || undefined}
+    />
   );
 }
 
@@ -98,16 +135,14 @@ function RoleSection({
   onOpen: TrayProps["onOpen"];
 }) {
   return (
-    <section className="space-y-1.5">
-      <div className="flex items-center gap-2 text-xs font-semibold">
-        <RoleDot color={role.color} />
-        <span className="truncate">{role.name}</span>
-        {goals.length === 0 && <span className="font-normal text-muted-foreground">· no rock yet</span>}
+    <section>
+      <RoleLabel role={role} count={goals.length} hint={goals.length === 0 ? "· no rock yet" : undefined} />
+      <div className="flex flex-col gap-1.5">
+        {goals.map((g) => (
+          <GoalCard key={g.id} goal={g} role={role} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
+        ))}
+        <AddInline placeholder="Add a rock…" label={`Add a rock for ${role.name}`} onAdd={(title) => onAddGoal({ title, roleId: role.id })} />
       </div>
-      {goals.map((g) => (
-        <GoalCard key={g.id} goal={g} role={role} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
-      ))}
-      <AddInline placeholder="Add a rock…" onAdd={(title) => onAddGoal({ title, roleId: role.id })} />
     </section>
   );
 }
@@ -129,28 +164,35 @@ function SawSection({
 }) {
   const loose = goals.filter((g) => !g.sawDimension);
   return (
-    <section className="space-y-2 rounded-lg border border-dashed p-2">
-      <div className="flex items-center gap-2 text-xs font-semibold">
-        <RoleDot color={role.color} />
-        {role.name}
-      </div>
-      {SAW_DIMENSIONS.map((d) => {
-        const mine = goals.filter((g) => g.sawDimension === d.key);
-        return (
-          <div key={d.key} className="space-y-1">
-            <div className="text-[11px] font-medium text-muted-foreground">{d.label}</div>
-            {mine.map((g) => (
+    <section>
+      <RoleLabel role={role} />
+      <div className="space-y-2">
+        {SAW_DIMENSIONS.map((d) => {
+          const mine = goals.filter((g) => g.sawDimension === d.key);
+          return (
+            <div key={d.key} className="flex flex-col gap-1.5">
+              <h4 className="px-2 text-xs font-medium text-muted-foreground">{d.label}</h4>
+              {mine.map((g) => (
+                <GoalCard key={g.id} goal={g} role={role} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
+              ))}
+              {mine.length === 0 && (
+                <AddInline
+                  placeholder={d.examples[0]}
+                  label={`Add a ${d.label.toLowerCase()} rock`}
+                  onAdd={(title) => onAddGoal({ title, roleId: role.id, sawDimension: d.key })}
+                />
+              )}
+            </div>
+          );
+        })}
+        {loose.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            {loose.map((g) => (
               <GoalCard key={g.id} goal={g} role={role} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
             ))}
-            {mine.length === 0 && (
-              <AddInline placeholder={d.examples[0]} onAdd={(title) => onAddGoal({ title, roleId: role.id, sawDimension: d.key })} />
-            )}
           </div>
-        );
-      })}
-      {loose.map((g) => (
-        <GoalCard key={g.id} goal={g} role={role} hidden={draggingId === `goal:${g.id}`} onToggle={onToggle} onOpen={onOpen} />
-      ))}
+        )}
+      </div>
     </section>
   );
 }
@@ -171,67 +213,86 @@ export function GoalCard({
   const { ref } = useDraggable<DragData>({ id: `goal:${goal.id}`, type: "goal", data: { kind: "goal", task: goal }, sensors: cardSensors });
   const done = goal.status === "done";
   const closed = goal.status === "missed" || goal.status === "dropped";
+  const meta: ReactNode[] = [];
+  if (goal.blockCount > 0) {
+    meta.push(
+      <span key="blocks">
+        {goal.blockCount}× · {formatDuration(goal.blockMinutes)}
+      </span>,
+    );
+  }
+  if (goal.scheduledDate) meta.push(<span key="day">{fmtDate(goal.scheduledDate, "EEE")}</span>);
+  if (goal.blockCount === 0 && !goal.scheduledDate && goal.status === "open") {
+    meta.push(
+      <span key="unplaced" className="inline-flex items-center gap-1">
+        <CircleDashed aria-hidden /> Not placed yet
+      </span>,
+    );
+  }
+  if (goal.carryCount > 0) {
+    meta.push(
+      <Tooltip key="carry">
+        <TooltipTrigger render={<span className="inline-flex items-center gap-1" />}>
+          <Repeat aria-hidden />
+          <span aria-hidden>{goal.carryCount}</span>
+          <span className="sr-only">Carried over {goal.carryCount}×</span>
+        </TooltipTrigger>
+        <TooltipContent>Carried over {goal.carryCount}×</TooltipContent>
+      </Tooltip>,
+    );
+  }
+  if (goal.estimateMinutes) meta.push(<span key="estimate">est. {formatDuration(goal.estimateMinutes)}</span>);
+
   return (
     <div
       ref={ref}
-      className={cn(
-        "group flex cursor-grab items-start gap-1.5 rounded-lg border bg-background px-1.5 py-1.5 text-sm shadow-xs active:cursor-grabbing",
-        hidden && "opacity-30",
-        closed && "opacity-60",
-      )}
+      data-done={done || undefined}
+      className={cn(boardCard, "group/card flex cursor-grab items-start gap-2 px-2.5 py-2 active:cursor-grabbing", hidden && dragSource)}
     >
-      <GripVertical aria-hidden className="mt-0.5 size-3.5 shrink-0 cursor-grab text-muted-foreground/60" />
-      <button
-        type="button"
-        onClick={() => onToggle(goal)}
-        data-no-drag
-        aria-label={done ? "Mark as not done" : "Mark as done"}
-        className={cn("mt-0.5 grid size-4 shrink-0 place-items-center rounded border", done && "border-primary bg-primary text-primary-foreground")}
-        style={!done && role ? { borderColor: role.color } : undefined}
-      >
-        {done && <Check className="size-3" />}
+      {/* Check and icon centre on the first title line (20px). */}
+      <span className="flex h-5 shrink-0 items-center">
+        <DoneCheck size="sm" done={done} color={role?.color} celebrate={goal.quadrant === 2} onToggle={() => onToggle(goal)} data-no-drag />
+      </span>
+      <span className="flex h-5 shrink-0 items-center">
+        <Mountain aria-hidden className="size-3.5 text-muted-foreground" />
+      </span>
+      <button type="button" onClick={() => onOpen(goal)} className="min-w-0 flex-1 rounded-xs text-left">
+        <span className={cn("block text-sm break-words text-foreground", closed && "text-muted-foreground")}>
+          <span className="strike">{goal.title}</span>
+        </span>
+        {meta.length > 0 && (
+          <RowMeta>
+            {meta.map((m, i) => (
+              <Fragment key={i}>
+                {i > 0 && <MetaSep />}
+                {m}
+              </Fragment>
+            ))}
+          </RowMeta>
+        )}
       </button>
-      <button type="button" onClick={() => onOpen(goal)} className="min-w-0 flex-1 text-left">
-        <div className={cn("leading-snug", done && "text-muted-foreground line-through")}>{goal.title}</div>
-        <div className="mt-0.5 flex flex-wrap gap-1 text-[10px] text-muted-foreground">
-          {goal.blockCount > 0 && (
-            <span className="rounded bg-primary/10 px-1 font-medium text-primary">
-              {goal.blockCount}× · {formatDuration(goal.blockMinutes)}
-            </span>
-          )}
-          {goal.scheduledDate && <span className="rounded bg-muted px-1 font-medium">{fmtDate(goal.scheduledDate, "EEE")}</span>}
-          {goal.blockCount === 0 && !goal.scheduledDate && goal.status === "open" && <span className="text-warning">unscheduled</span>}
-          {goal.carryCount > 0 && (
-            <span className="inline-flex items-center gap-0.5" title={`Carried over ${goal.carryCount}×`}>
-              <Repeat className="size-2.5" /> {goal.carryCount}
-            </span>
-          )}
-          {goal.estimateMinutes ? <span>est. {formatDuration(goal.estimateMinutes)}</span> : null}
-        </div>
-      </button>
+      {/* Decorative: the whole card drags. Shown on hover, and always on touch. */}
+      <span aria-hidden className="flex h-5 shrink-0 items-center text-faint-foreground opacity-0 transition-opacity duration-120 group-hover/card:opacity-100 pointer-coarse:opacity-100">
+        <GripVertical className="size-3.5" />
+      </span>
     </div>
   );
 }
 
-function AddInline({ placeholder, onAdd }: { placeholder: string; onAdd: (title: string) => void }) {
+function AddInline({ placeholder, label, onAdd }: { placeholder: string; label: string; onAdd: (title: string) => void }) {
   const [value, setValue] = useState("");
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
+    <QuickAdd
+      variant="inline"
+      value={value}
+      onValueChange={setValue}
+      onSubmit={() => {
         if (!value.trim()) return;
         onAdd(value.trim());
         setValue("");
       }}
-      className="flex items-center gap-1"
-    >
-      <Plus className="size-3.5 shrink-0 text-muted-foreground" />
-      <Input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder={placeholder}
-        className="h-7 border-none bg-transparent px-1 text-xs shadow-none focus-visible:ring-1 dark:bg-transparent"
-      />
-    </form>
+      placeholder={placeholder}
+      aria-label={label}
+    />
   );
 }

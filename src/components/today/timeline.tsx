@@ -1,5 +1,10 @@
 import { Check, Mountain, Plus, SkipForward } from "lucide-react";
-import { useState } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
+import { EmptyState } from "@/components/empty-state";
+import { EventTitle, eventBlockVariants } from "@/components/event-block";
+import { IconButton } from "@/components/icon-button";
+import { SectionHeader } from "@/components/page";
+import { MetaSep } from "@/components/row";
 import { Button } from "@/components/ui/button";
 import { BlockDialog, draftFromBlock, type BlockDraft } from "@/components/week/block-dialog";
 import type { Block } from "@/lib/api";
@@ -58,37 +63,45 @@ export function DayTimeline({
     });
   };
 
+  const nowLabel = formatMinutes(nowMin);
+  const nowPill = <NowPill label={nowLabel} />;
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Schedule</h2>
-        <Button variant="ghost" size="xs" onClick={() => newAt(Math.max(dayStartHour * 60, Math.ceil(nowMin / 30) * 30))}>
-          <Plus /> Add
-        </Button>
-      </div>
-      <ol className="space-y-1">
+    <section>
+      <SectionHeader
+        title="Schedule"
+        action={
+          <Button variant="ghost" size="sm" onClick={() => newAt(Math.max(dayStartHour * 60, Math.ceil(nowMin / 30) * 30))}>
+            <Plus /> Add
+          </Button>
+        }
+      />
+      <ol>
         {rows.map((row) => {
           if (row.kind === "gap") {
             const active = isToday && nowMin >= row.from && nowMin < row.to;
             return (
-              <li key={`gap-${row.from}`}>
+              <TimelineRow key={`gap-${row.from}`} current={active} time={active ? nowPill : formatMinutes(row.from)} gap>
                 <button
                   type="button"
                   onClick={() => newAt(Math.ceil(Math.max(row.from, isToday ? nowMin : 0) / 30) * 30)}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-lg border border-dashed px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted/60",
-                    active && "border-primary/40 text-foreground",
-                  )}
+                  className="group/gap flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 pl-3.5 text-left text-xs text-muted-foreground transition-colors duration-120 hover:bg-subtle hover:text-foreground"
                 >
-                  <span className="w-20 shrink-0 tabular-nums">
+                  {active && <span className="sm:hidden">{nowPill}</span>}
+                  {/* The start time sits in the time column from `sm`; the full range stays in the button's name. */}
+                  <span className="tabular-nums sm:sr-only">
                     {formatMinutes(row.from)}–{formatMinutes(row.to)}
                   </span>
-                  <span>
+                  <MetaSep className="sm:hidden" />
+                  <span className="tabular-nums">
                     Open · {formatDuration(row.to - row.from)}
-                    {active && " · now"}
+                    {active && <span className="sr-only"> · now</span>}
+                  </span>
+                  <span className="ml-auto flex items-center gap-1 opacity-0 transition-opacity duration-120 group-hover/gap:opacity-100 group-focus-visible/gap:opacity-100 pointer-coarse:opacity-100">
+                    <Plus className="size-3.5" /> Add block
                   </span>
                 </button>
-              </li>
+              </TimelineRow>
             );
           }
           const b = row.block;
@@ -96,55 +109,70 @@ export function DayTimeline({
           const current = isToday && nowMin >= b.startMin && nowMin < b.endMin;
           const past = isToday && nowMin >= b.endMin;
           const done = b.status === "done" || b.taskStatus === "done";
+          const skipped = b.status === "skipped";
           return (
-            <li key={b.id}>
+            <TimelineRow
+              key={b.id}
+              current={current}
+              time={
+                <>
+                  {/* Now replaces only the start time; the end time stays under it. */}
+                  {current ? nowPill : <span className="block">{formatMinutes(b.startMin)}</span>}
+                  <span className="block text-faint-foreground">{formatMinutes(b.endMin)}</span>
+                </>
+              }
+            >
               <div
-                className={cn(
-                  "group flex items-center gap-3 rounded-lg border bg-card px-3 py-2 text-sm",
-                  current && "ring-2 ring-primary/50",
-                  (b.status === "skipped" || (past && !done)) && "opacity-70",
-                )}
-                style={{ borderLeft: `3px solid ${role?.color ?? "var(--border)"}` }}
+                data-done={done || undefined}
+                data-skipped={skipped || undefined}
+                data-past={(past && !done) || undefined}
+                style={{ "--role": role?.color ?? "var(--border-strong)" } as CSSProperties}
+                className={cn(eventBlockVariants({ kind: b.kind, layout: "row" }), "flex items-start gap-2")}
               >
-                <span className="w-20 shrink-0 text-xs text-muted-foreground tabular-nums">
-                  {formatMinutes(b.startMin)}–{formatMinutes(b.endMin)}
-                </span>
-                <button type="button" onClick={() => setDraft(draftFromBlock(b))} className="min-w-0 flex-1 text-left">
-                  <span className={cn("flex items-center gap-1.5", (done || b.status === "skipped") && "text-muted-foreground line-through")}>
-                    {b.taskKind === "goal" && <Mountain className="size-3.5 shrink-0 text-primary" />}
-                    <span className="truncate">{b.title || b.taskTitle}</span>
+                <button type="button" onClick={() => setDraft(draftFromBlock(b))} className="flex min-w-0 flex-1 flex-col rounded-xs text-left focus-ring-inset">
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm">
+                    {b.taskKind === "goal" && <Mountain className="size-3.5 shrink-0 text-muted-foreground" />}
+                    <EventTitle className="block min-w-0 truncate">{b.title || b.taskTitle}</EventTitle>
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {current ? "Now" : b.kind === "appointment" ? "Appointment" : "Focus time"}
-                    {role ? ` · ${role.name}` : ""}
+                  {/* Below `sm` the time joins this line, above the title. From `sm` it sits in the
+                      time column, and the full range stays in the button's name. */}
+                  <span className="mt-0.5 flex min-w-0 items-center gap-x-1.5 text-xs text-muted-foreground max-sm:order-first max-sm:mt-0 max-sm:mb-0.5">
+                    {current && <NowPill label={nowLabel} className="shrink-0 sm:hidden" />}
+                    <span className="shrink-0 tabular-nums sm:sr-only">
+                      {formatMinutes(b.startMin)}–{formatMinutes(b.endMin)}
+                    </span>
+                    {/* On the role tint: muted, never faint. */}
+                    <MetaSep className="text-muted-foreground sm:hidden" />
+                    <span className="min-w-0 truncate">
+                      {current ? "Now" : b.kind === "appointment" ? "Appointment" : "Focus time"}
+                      {role ? ` · ${role.name}` : ""}
+                    </span>
                   </span>
                 </button>
-                <div className="flex gap-0.5 opacity-60 group-hover:opacity-100">
-                  <Button
-                    variant={b.status === "done" ? "secondary" : "ghost"}
+                {/* On touch the gap lets each 44px hit area stand clear of its neighbour's. */}
+                <div className="-my-0.5 -mr-1.5 flex shrink-0 gap-0.5 pointer-coarse:gap-4">
+                  <IconButton
                     size="icon-xs"
-                    aria-label="Happened"
-                    title="Happened"
+                    label="Happened"
+                    icon={<Check />}
+                    aria-pressed={b.status === "done"}
+                    className="aria-pressed:bg-success-soft aria-pressed:text-success"
                     onClick={() => update.mutate({ id: b.id, status: b.status === "done" ? "planned" : "done" })}
-                  >
-                    <Check />
-                  </Button>
-                  <Button
-                    variant={b.status === "skipped" ? "secondary" : "ghost"}
+                  />
+                  <IconButton
                     size="icon-xs"
-                    aria-label="Didn't happen"
-                    title="Didn't happen"
+                    label="Didn't happen"
+                    icon={<SkipForward />}
+                    aria-pressed={skipped}
                     onClick={() => update.mutate({ id: b.id, status: b.status === "skipped" ? "planned" : "skipped" })}
-                  >
-                    <SkipForward />
-                  </Button>
+                  />
                 </div>
               </div>
-            </li>
+            </TimelineRow>
           );
         })}
       </ol>
-      {sorted.length === 0 && <p className="text-xs text-muted-foreground">Nothing scheduled. Plenty of room to put first things first.</p>}
+      {sorted.length === 0 && <EmptyState size="compact" className="px-0" title="Nothing scheduled." description="Plenty of room to put first things first." />}
       <BlockDialog
         draft={draft}
         onClose={() => setDraft(null)}
@@ -161,6 +189,30 @@ export function DayTimeline({
         dayStartHour={dayStartHour}
         dayEndHour={dayEndHour}
       />
-    </div>
+    </section>
+  );
+}
+
+/**
+ * One line of the agenda: the time in a right-aligned gutter, then the item on the spine. The
+ * current item's spine segment turns teal. Below `sm` the gutter folds away and the time moves
+ * into the item itself.
+ */
+function TimelineRow({ time, current, gap = false, children }: { time: ReactNode; current: boolean; gap?: boolean; children: ReactNode }) {
+  return (
+    <li className="grid grid-cols-1 gap-x-3 sm:grid-cols-[3.5rem_minmax(0,1fr)]">
+      <div className={cn("text-right text-xs text-muted-foreground tabular-nums max-sm:hidden", gap ? "pt-1.5" : "pt-3")}>{time}</div>
+      <div className={cn("min-w-0 border-l border-border-subtle pb-2 pl-3", current && "-ml-px border-l-2 border-primary")}>{children}</div>
+    </li>
+  );
+}
+
+/** The signature: now, as a teal pill on the spine. */
+function NowPill({ label, className }: { label: string; className?: string }) {
+  return (
+    <span className={cn("inline-block rounded-full bg-primary px-1.5 text-2xs font-medium text-primary-foreground tabular-nums", className)}>
+      <span className="sr-only">Now, </span>
+      {label}
+    </span>
   );
 }

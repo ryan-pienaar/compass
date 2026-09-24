@@ -1,18 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Mountain, Plus, Repeat, Target, Trash2 } from "lucide-react";
+import { ArrowUpRight, CircleCheck, Mountain, Repeat, Target, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { addWeeksISO } from "@shared/dates.ts";
 import { SAW_DIMENSIONS, type SawDimension } from "@shared/content.ts";
 import { useAppState } from "@/components/app-state";
-import { PrincipleNote } from "@/components/page";
+import { AddChip, Chip } from "@/components/chip";
+import { IconButton } from "@/components/icon-button";
+import { PrincipleNote, StepHeader } from "@/components/page";
 import { RoleDot } from "@/components/badges";
 import { EstimateSelect } from "@/components/pickers";
+import { QuickAdd } from "@/components/quick-add";
+import { Row, RowActions } from "@/components/row";
 import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { api, call, type Goal, type Role, type Task, type WeekBoard, type WeekGoal } from "@/lib/api";
 import { useApiMutation, useTaskActions } from "@/lib/mutations";
 import { goalsQuery, tasksQuery, weekQuery } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+
+/** Where a suggestion comes from: shown as a trailing icon, named in the chip's accessible name and tooltip. */
+const SUGGESTION_SOURCE = {
+  lt: { icon: Target, text: "Toward a long-term goal" },
+  rp: { icon: Repeat, text: "Repeat from last week" },
+  bl: { icon: ArrowUpRight, text: "Promote a Quadrant II task" },
+} as const;
 
 export function StepGoals({ board }: { board: WeekBoard }) {
   const start = board.week.startDate;
@@ -25,20 +38,22 @@ export function StepGoals({ board }: { board: WeekBoard }) {
   const total = board.goals.length;
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-2">
-        <h2 className="compass-display text-3xl">Select your big rocks</h2>
-        <p className="text-muted-foreground">
-          For each role, one or two important results you want by the end of the week. Make them results, not activities, and
-          let at least some be Quadrant II: important but not urgent. Tie them to your long-term goals where you can.
-        </p>
-      </div>
+    <div>
+      <StepHeader
+        title="Select your big rocks"
+        lede={
+          <>
+            For each role, one or two important results you want by the end of the week. Make them results, not activities, and
+            let at least some be Quadrant II: important but not urgent. Tie them to your long-term goals where you can.
+          </>
+        }
+      />
       {total > 10 && (
-        <PrincipleNote icon={<Mountain className="size-4" />}>
+        <PrincipleNote icon={<Mountain />} className="-mt-2 mb-8">
           {total} rocks is a full jar. Big rocks are few by definition; leave room for people and the unexpected.
         </PrincipleNote>
       )}
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {roles.map((role) =>
           role.isSaw ? (
             <SawCard key={role.id} role={role} start={start} goals={board.goals.filter((g) => g.roleId === role.id)} />
@@ -84,104 +99,129 @@ function RoleCard({
   const suggestions = [
     ...longTerm
       .filter((g) => !linked.has(g.id))
-      .map((g) => ({ key: `lt-${g.id}`, icon: <Target className="size-3" />, label: g.title, add: () => create.mutate({ title: g.title, kind: "goal", roleId: role.id, goalId: g.id, weekStart: start }) })),
+      .map((g) => ({ key: `lt-${g.id}`, source: "lt" as const, label: g.title, add: () => create.mutate({ title: g.title, kind: "goal", roleId: role.id, goalId: g.id, weekStart: start }) })),
     ...repeatable.map((g) => ({
       key: `rp-${g.id}`,
-      icon: <Repeat className="size-3" />,
+      source: "rp" as const,
       label: g.title,
       add: () =>
         create.mutate({ title: g.title, kind: "goal", roleId: role.id, goalId: g.goalId, estimateMinutes: g.estimateMinutes, weekStart: start }),
     })),
     ...backlog.slice(0, 4).map((t) => ({
       key: `bl-${t.id}`,
-      icon: <ArrowUpRight className="size-3" />,
+      source: "bl" as const,
       label: t.title,
       add: () => update.mutate({ id: t.id, kind: "goal", weekStart: start }),
     })),
   ];
 
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border bg-card p-4">
-      <header>
-        <div className="flex items-center gap-2 font-semibold">
-          <RoleDot color={role.color} className="size-2.5" />
-          {role.name}
-          <span className="ml-auto text-xs font-normal text-muted-foreground">{goals.length === 0 ? "no rock yet" : `${goals.length} rock${goals.length > 1 ? "s" : ""}`}</span>
+    <Card render={<section />} className="min-w-0">
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle as="h3" className="flex items-center gap-2">
+            <RoleDot color={role.color} className="size-2.5" />
+            <span className="min-w-0">{role.name}</span>
+          </CardTitle>
+          {role.description && <p className="mt-1 voice-sm text-muted-foreground italic">{role.description}</p>}
         </div>
-        {role.description && <p className="compass-text mt-0.5 !text-sm text-muted-foreground italic">{role.description}</p>}
-      </header>
-      <ul className="space-y-1.5">
-        {goals.map((g) => (
-          <GoalRow key={g.id} goal={g} />
-        ))}
-      </ul>
-      <QuickAdd
-        placeholder={`Most important result as ${role.name.toLowerCase()} this week…`}
-        onAdd={(title) => create.mutate({ title, kind: "goal", roleId: role.id, weekStart: start })}
-      />
-      {goals.length > 3 && <p className="text-xs text-warning">Fewer, bigger rocks: could any of these wait or be combined?</p>}
-      {suggestions.length > 0 && (
-        <div className="space-y-1.5">
-          <div className="text-[11px] font-medium tracking-wide text-muted-foreground uppercase">Suggestions</div>
-          <div className="flex flex-wrap gap-1.5">
-            {suggestions.slice(0, 6).map((s) => (
-              <button
-                key={s.key}
-                type="button"
-                onClick={s.add}
-                className="inline-flex max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs hover:bg-muted"
-                title={s.key.startsWith("lt") ? "Toward a long-term goal" : s.key.startsWith("rp") ? "Repeat from last week" : "Promote a Quadrant II task"}
-              >
-                {s.icon}
-                <span className="truncate">{s.label}</span>
-              </button>
+        <CardAction className="pt-0.5 text-xs text-muted-foreground tabular-nums">
+          {goals.length === 0 ? "no rock yet" : `${goals.length} rock${goals.length > 1 ? "s" : ""}`}
+        </CardAction>
+      </CardHeader>
+      <div>
+        {goals.length > 0 && (
+          <ul className="-mx-3">
+            {goals.map((g) => (
+              <GoalRow key={g.id} goal={g} />
             ))}
+          </ul>
+        )}
+        <RockAdd
+          placeholder={`Most important result as ${role.name.toLowerCase()} this week…`}
+          label={`Add a rock for ${role.name}`}
+          onAdd={(title) => create.mutate({ title, kind: "goal", roleId: role.id, weekStart: start })}
+        />
+      </div>
+      {goals.length > 3 && (
+        <p className="flex items-start gap-1.5 text-xs text-warning">
+          <TriangleAlert aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+          Fewer, bigger rocks: could any of these wait or be combined?
+        </p>
+      )}
+      {suggestions.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">Suggestions</p>
+          <div className="flex flex-wrap gap-1.5">
+            {suggestions.slice(0, 6).map((s) => {
+              const { icon: SourceIcon, text } = SUGGESTION_SOURCE[s.source];
+              return (
+                <Tooltip key={s.key}>
+                  <TooltipTrigger render={<AddChip onClick={s.add} className="max-w-full" />}>
+                    <span className="min-w-0 truncate">{s.label}</span>
+                    <span className="sr-only">, {text.toLowerCase()}</span>
+                    <SourceIcon aria-hidden className="shrink-0 text-muted-foreground" />
+                  </TooltipTrigger>
+                  <TooltipContent>{text}</TooltipContent>
+                </Tooltip>
+              );
+            })}
           </div>
         </div>
       )}
       {goals.length === 0 && (
-        <button type="button" onClick={onSkip} className="self-start text-xs text-muted-foreground underline-offset-2 hover:underline">
+        <Button variant="ghost" size="xs" onClick={onSkip} className="-ml-2.5 self-start">
           No rock for this role this week (that&apos;s allowed)
-        </button>
+        </Button>
       )}
-    </section>
+    </Card>
   );
 }
 
 function SawCard({ role, start, goals }: { role: Role; start: string; goals: WeekGoal[] }) {
   const { create } = useTaskActions();
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-dashed bg-card p-4 lg:col-span-2">
-      <header>
-        <div className="flex items-center gap-2 font-semibold">
-          <RoleDot color={role.color} className="size-2.5" /> Sharpen the Saw
+    <Card render={<section />} className="min-w-0 xl:col-span-2">
+      <CardHeader>
+        <div className="min-w-0">
+          <CardTitle as="h3" className="flex items-center gap-2">
+            <RoleDot color={role.color} className="size-2.5" /> Sharpen the saw
+          </CardTitle>
+          <p className="mt-1 max-w-[65ch] text-sm text-muted-foreground">
+            Renewal is Quadrant II by definition: nobody will make you do it. One small goal in each dimension keeps the rest of the
+            week possible.
+          </p>
         </div>
-        <p className="text-sm text-muted-foreground">
-          Renewal is Quadrant II by definition: nobody will make you do it. One small goal in each dimension keeps the rest of the
-          week possible.
-        </p>
-      </header>
-      <div className="grid gap-3 sm:grid-cols-2">
+        <CardAction>
+          <Chip>Always on</Chip>
+        </CardAction>
+      </CardHeader>
+      <div className="-mx-5 -mb-5 grid grid-cols-1 gap-px overflow-hidden rounded-b-xl border-t border-border-subtle bg-border-subtle max-sm:-mx-4 max-sm:-mb-4 sm:grid-cols-2">
         {SAW_DIMENSIONS.map((d) => {
           const mine = goals.filter((g) => g.sawDimension === d.key);
           return (
-            <div key={d.key} className="rounded-xl bg-muted/40 p-3">
-              <div className="text-sm font-medium">{d.label}</div>
-              <div className="mb-2 text-xs text-muted-foreground">{d.prompt}</div>
-              <ul className="mb-1 space-y-1.5">
-                {mine.map((g) => (
-                  <GoalRow key={g.id} goal={g} />
-                ))}
-              </ul>
-              <QuickAdd
-                placeholder={`e.g. ${d.examples[0]}`}
-                onAdd={(title) => create.mutate({ title, kind: "goal", roleId: role.id, sawDimension: d.key as SawDimension, weekStart: start })}
-              />
+            <div key={d.key} className="min-w-0 bg-card px-5 pt-4 pb-3 max-sm:px-4">
+              <h4 className="text-sm font-medium text-foreground">{d.label}</h4>
+              <p className="text-xs text-muted-foreground">{d.prompt}</p>
+              <div className="mt-2">
+                {mine.length > 0 && (
+                  <ul className="-mx-3">
+                    {mine.map((g) => (
+                      <GoalRow key={g.id} goal={g} />
+                    ))}
+                  </ul>
+                )}
+                <RockAdd
+                  placeholder={`e.g. ${d.examples[0]}`}
+                  label={`Add a rock for ${d.label}`}
+                  onAdd={(title) => create.mutate({ title, kind: "goal", roleId: role.id, sawDimension: d.key as SawDimension, weekStart: start })}
+                />
+              </div>
             </div>
           );
         })}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -190,50 +230,80 @@ function GoalRow({ goal }: { goal: WeekGoal }) {
   const { openTask } = useAppState();
   const [title, setTitle] = useState(goal.title);
   useEffect(() => setTitle(goal.title), [goal.title]);
+  const done = goal.status === "done";
   return (
-    <li className={cn("group flex items-center gap-2 rounded-lg border bg-background px-2 py-1", goal.status === "done" && "opacity-60")}>
-      <Mountain className="size-3.5 shrink-0 text-primary" />
-      <Input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        onBlur={() => title.trim() && title !== goal.title && update.mutate({ id: goal.id, title: title.trim() })}
-        onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-        className="h-7 flex-1 border-none bg-transparent px-1 shadow-none focus-visible:ring-1 dark:bg-transparent"
-        aria-label="Rock title"
-      />
-      {goal.carryCount > 0 && (
-        <span className="inline-flex items-center gap-0.5 text-[11px] text-warning" title={`Carried ${goal.carryCount}×`}>
-          <Repeat className="size-3" />
-          {goal.carryCount}
-        </span>
-      )}
-      <EstimateSelect value={goal.estimateMinutes} onChange={(estimateMinutes) => update.mutate({ id: goal.id, estimateMinutes })} size="sm" className="h-7 min-w-24 text-xs" />
-      <Button variant="ghost" size="icon-xs" onClick={() => openTask(goal.id)} aria-label="Details" title="Details">
-        <ArrowUpRight />
-      </Button>
-      <Button variant="ghost" size="icon-xs" onClick={() => remove.mutate(goal.id)} aria-label="Remove rock" title="Remove">
-        <Trash2 />
-      </Button>
-    </li>
+    // Phones: always two lines, the title across the card and its meta and actions under it, with a
+    // hairline from the text column between rocks so each pair reads as one. From sm: one line,
+    // wrapping only when the card gets narrow.
+    <Row
+      as="li"
+      done={done}
+      className="flex-wrap gap-x-2.5 gap-y-0.5 py-1.5 max-sm:gap-y-0 max-sm:before:pointer-events-none max-sm:before:absolute max-sm:before:top-0 max-sm:before:right-3 max-sm:before:left-9.5 max-sm:before:h-px max-sm:before:bg-border-subtle max-sm:first:before:hidden"
+    >
+      <div className="flex min-w-0 flex-1 basis-full items-center gap-2.5 sm:min-w-44 sm:basis-44">
+        {done ? (
+          <CircleCheck aria-label="Done" className="size-4 shrink-0 text-success" />
+        ) : (
+          <Mountain aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        )}
+        <Input
+          variant="ghost"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onBlur={() => title.trim() && title !== goal.title && update.mutate({ id: goal.id, title: title.trim() })}
+          onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+          className="h-8 min-w-0 flex-1 truncate group-data-[done]/row:text-muted-foreground"
+          aria-label="Rock title"
+        />
+      </div>
+      <div className="ml-auto flex shrink-0 items-center gap-1 max-sm:w-full max-sm:pl-6.5">
+        {goal.carryCount > 0 && <CarryChip count={goal.carryCount} />}
+        <EstimateSelect
+          value={goal.estimateMinutes}
+          onChange={(estimateMinutes) => update.mutate({ id: goal.id, estimateMinutes })}
+          size="sm"
+          variant="ghost"
+          // First on its line on phones: pull the ghost padding back so its text sits under the title.
+          className={cn("min-w-0 text-muted-foreground", goal.carryCount === 0 && "max-sm:-ml-2.5")}
+        />
+        <RowActions className="max-sm:ml-auto">
+          <IconButton size="icon-xs" label="Details" icon={<ArrowUpRight />} onClick={() => openTask(goal.id)} />
+          <IconButton size="icon-xs" label="Remove rock" icon={<Trash2 />} onClick={() => remove.mutate(goal.id)} />
+        </RowActions>
+      </div>
+    </Row>
   );
 }
 
-function QuickAdd({ placeholder, onAdd }: { placeholder: string; onAdd: (title: string) => void }) {
+/** Carried from an earlier week: neutral, never amber. */
+function CarryChip({ count }: { count: number }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<Chip size="sm" icon={<Repeat aria-hidden />} className="tabular-nums" />}>
+        <span aria-hidden>{count}</span>
+        <span className="sr-only">Carried {count}×</span>
+      </TooltipTrigger>
+      <TooltipContent>Carried {count}×</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RockAdd({ placeholder, label, onAdd }: { placeholder: string; label: string; onAdd: (title: string) => void }) {
   const [value, setValue] = useState("");
   return (
-    <form
-      className="flex items-center gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
+    <QuickAdd
+      variant="inline"
+      className="-mx-2"
+      value={value}
+      onValueChange={setValue}
+      placeholder={placeholder}
+      aria-label={label}
+      submitLabel="Add rock"
+      onSubmit={() => {
         if (!value.trim()) return;
         onAdd(value.trim());
         setValue("");
       }}
-    >
-      <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} className="h-8 text-sm" />
-      <Button type="submit" size="sm" variant="outline" disabled={!value.trim()} aria-label="Add rock">
-        <Plus />
-      </Button>
-    </form>
+    />
   );
 }

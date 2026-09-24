@@ -1,8 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ArrowRight, Check, Timer, X } from "lucide-react";
+import { ArrowRight, Clock, X } from "lucide-react";
 import { useState } from "react";
 import { isValidISODate, weekStartFor } from "@shared/dates.ts";
+import { Chip } from "@/components/chip";
+import { IconButton } from "@/components/icon-button";
+import { ActionBar, PlanStepper, StepBody } from "@/components/plan/plan-chrome";
 import { StepCommit } from "@/components/plan/step-commit";
 import { StepCompass } from "@/components/plan/step-compass";
 import { StepGoals } from "@/components/plan/step-goals";
@@ -11,6 +14,7 @@ import { StepRoles } from "@/components/plan/step-roles";
 import { StepSchedule } from "@/components/plan/step-schedule";
 import { PLAN_STEPS, STEP_LABELS, type PlanStep } from "@/components/plan/steps";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatWeekRange } from "@/lib/format";
 import { useBootstrap, useNow } from "@/lib/hooks";
 import { bootstrapQuery, weekQuery } from "@/lib/queries";
@@ -29,6 +33,16 @@ export const Route = createFileRoute("/_app/plan/$start")({
   component: PlanPage,
 });
 
+/** Content width per step: a reading column, a wider one for the two-column rocks, the full grid for scheduling. */
+const STEP_WIDTH: Record<PlanStep, string> = {
+  review: "max-w-3xl",
+  compass: "max-w-3xl",
+  roles: "max-w-3xl",
+  goals: "max-w-5xl",
+  schedule: "max-w-8xl lg:px-10",
+  commit: "max-w-3xl",
+};
+
 function PlanPage() {
   const { start } = Route.useParams();
   const search = Route.useSearch();
@@ -43,77 +57,52 @@ function PlanPage() {
   const go = (s: PlanStep) => navigate({ search: { step: s }, replace: false });
   const next = () => index < steps.length - 1 && go(steps[index + 1]);
   const back = () => index > 0 && go(steps[index - 1]);
+  const width = STEP_WIDTH[step];
 
   return (
     <div className="flex min-h-[calc(100svh-3rem)] flex-col">
-      <div className="border-b bg-background/80 px-4 py-3 sm:px-6 lg:px-8">
-        <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-x-6 gap-y-3">
-          <div>
-            <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+      <header className="sticky top-12 z-20 border-b border-border-subtle bg-background/85 backdrop-blur-md backdrop-saturate-150">
+        <div className="@container/plan mx-auto flex h-14 max-w-8xl items-center gap-3 px-4 sm:gap-4 sm:px-6 lg:px-10">
+          <div className="sr-only @2xl/plan:not-sr-only @2xl/plan:shrink-0">
+            <p className="text-xs font-medium text-muted-foreground">
               Weekly planning · {start === weekStart ? "this week" : "week of"}
-            </div>
-            <h1 className="text-lg font-semibold tracking-tight">{formatWeekRange(start)}</h1>
+            </p>
+            <h1 className="truncate text-sm font-semibold text-foreground tabular-nums">{formatWeekRange(start)}</h1>
           </div>
-          <ol className="flex flex-1 flex-wrap items-center gap-1" aria-label="Planning steps">
-            {steps.map((s, i) => (
-              <li key={s}>
-                <button
-                  type="button"
-                  onClick={() => go(s)}
-                  aria-current={s === step ? "step" : undefined}
-                  className={cn(
-                    "flex items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors",
-                    s === step ? "border-primary bg-primary text-primary-foreground" : i < index ? "border-primary/30 text-foreground hover:bg-muted" : "text-muted-foreground hover:bg-muted",
-                  )}
-                  title={STEP_LABELS[s].hint}
-                >
-                  <span className={cn("grid size-4.5 place-items-center rounded-full text-[10px] font-semibold", s === step ? "bg-primary-foreground/20" : "bg-muted")}>
-                    {i < index ? <Check className="size-3" /> : i + 1}
-                  </span>
-                  {STEP_LABELS[s].label}
-                </button>
-              </li>
-            ))}
-          </ol>
-          <div className="flex items-center gap-2">
+          <div className="@container/steps flex min-w-0 flex-1 justify-start @2xl/plan:justify-center">
+            <PlanStepper steps={steps} current={step} committed={!!board && board.week.status !== "draft"} onSelect={go} />
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
             <ElapsedTimer start={start} />
-            <Button variant="ghost" size="icon-sm" aria-label="Leave planning" render={<Link to="/week/$start" params={{ start }} />}>
-              <X />
-            </Button>
+            <IconButton label="Leave planning" icon={<X />} tooltipSide="bottom" render={<Link to="/week/$start" params={{ start }} />} />
           </div>
         </div>
-      </div>
+      </header>
 
-      <div className={cn("flex-1 px-4 py-6 sm:px-6 lg:px-8", step === "schedule" && "py-4")}>
-        <div className={cn("mx-auto", step === "schedule" ? "max-w-[1500px]" : "max-w-4xl")}>
-          {!board ? null : step === "review" ? (
-            <StepReview board={board} planStart={start} onDone={next} />
-          ) : step === "compass" ? (
-            <StepCompass board={board} />
-          ) : step === "roles" ? (
-            <StepRoles board={board} />
-          ) : step === "goals" ? (
-            <StepGoals board={board} />
-          ) : step === "schedule" ? (
-            <StepSchedule board={board} />
-          ) : (
-            <StepCommit board={board} />
-          )}
-        </div>
-      </div>
-
-      {step !== "review" && step !== "commit" && (
-        <div className="sticky bottom-0 border-t bg-background/90 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
-          <div className={cn("mx-auto flex items-center justify-between", step === "schedule" ? "max-w-[1500px]" : "max-w-4xl")}>
-            <Button variant="ghost" onClick={back} disabled={index === 0}>
-              <ArrowLeft /> Back
-            </Button>
-            <span className="hidden text-sm text-muted-foreground sm:block">{STEP_LABELS[step].hint}</span>
-            <Button onClick={next}>
+      {/* Review and commit render their own body and ActionBar (their primary action lives in their state). */}
+      {!board ? null : step === "review" ? (
+        <StepReview board={board} planStart={start} onDone={next} onBack={back} backDisabled={index === 0} />
+      ) : step === "commit" ? (
+        <StepCommit board={board} onBack={back} backDisabled={index === 0} />
+      ) : (
+        <>
+          <StepBody className={cn(width, step === "schedule" && "py-4")}>
+            {step === "compass" ? (
+              <StepCompass board={board} />
+            ) : step === "roles" ? (
+              <StepRoles board={board} />
+            ) : step === "goals" ? (
+              <StepGoals board={board} />
+            ) : (
+              <StepSchedule board={board} />
+            )}
+          </StepBody>
+          <ActionBar onBack={back} backDisabled={index === 0} hint={STEP_LABELS[step].hint} className={width}>
+            <Button size="xl" onClick={next}>
               Next: {STEP_LABELS[steps[index + 1]]?.label} <ArrowRight />
             </Button>
-          </div>
-        </div>
+          </ActionBar>
+        </>
       )}
     </div>
   );
@@ -136,11 +125,16 @@ function ElapsedTimer({ start }: { start: string }) {
   const now = useNow(15_000).getTime();
   const minutes = Math.max(0, Math.floor((now - startedAt) / 60_000));
   return (
-    <span
-      className={cn("inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs tabular-nums", minutes > 30 ? "text-warning" : "text-muted-foreground")}
-      title="Aim for about 30 minutes"
-    >
-      <Timer className="size-3.5" /> {minutes} min
-    </span>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Chip tone={minutes > 30 ? "warning" : "neutral"} icon={<Clock aria-hidden />} className="tabular-nums max-[359px]:[&>svg]:hidden" />
+        }
+      >
+        <span className="sr-only">Time spent planning: </span>
+        {minutes} min
+      </TooltipTrigger>
+      <TooltipContent side="bottom">Aim for about 30 minutes</TooltipContent>
+    </Tooltip>
   );
 }

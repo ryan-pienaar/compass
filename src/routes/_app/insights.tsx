@@ -1,19 +1,26 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { CalendarClock } from "lucide-react";
 import { useState } from "react";
 import { QUADRANTS } from "@shared/quadrant.ts";
 import { useAppState } from "@/components/app-state";
 import { QUADRANT_CLASSES } from "@/components/badges";
+import { EmptyState } from "@/components/empty-state";
 import { IntegrityLine, QuadrantColumns, RoleHeatmap } from "@/components/insights/charts";
 import { TimeAuditTab } from "@/components/insights/time-audit";
 import { UrgencyCheck } from "@/components/insights/urgency-check";
-import { StatTile } from "@/components/insights/viz";
-import { Page, PageHeader } from "@/components/page";
+import { ChartCard, DataTable } from "@/components/insights/viz";
+import { MeterSegments } from "@/components/meter";
+import { Page, PageHeader, SectionHeader } from "@/components/page";
+import { Row, RowTitle } from "@/components/row";
 import { Segmented } from "@/components/segmented";
+import { StatCell, StatStrip } from "@/components/stat";
+import { CardFooter } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Insights } from "@/lib/api";
-import { hoursLabel, pct } from "@/lib/format";
+import { fmtDate, hoursLabel, pct } from "@/lib/format";
+import { useBootstrap } from "@/lib/hooks";
 import { insightsQuery } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +39,7 @@ function InsightsPage() {
   return (
     <Page width="wide">
       <PageHeader
+        habit={1}
         eyebrow="Self-awareness"
         title="Insights"
         description="Stand apart and look at your weeks: where the time went, whether the roles got their share, and how well you kept your promises."
@@ -42,13 +50,13 @@ function InsightsPage() {
           <TabsTrigger value="audit">Time audit</TabsTrigger>
           <TabsTrigger value="urgency">Urgency check</TabsTrigger>
         </TabsList>
-        <TabsContent value="overview" className="pt-4">
+        <TabsContent value="overview">
           <Overview />
         </TabsContent>
-        <TabsContent value="audit" className="pt-4">
+        <TabsContent value="audit">
           <TimeAuditTab />
         </TabsContent>
-        <TabsContent value="urgency" className="pt-4">
+        <TabsContent value="urgency">
           <UrgencyCheck />
         </TabsContent>
       </Tabs>
@@ -59,10 +67,11 @@ function InsightsPage() {
 function Overview() {
   const [range, setRange] = useState<"8" | "12" | "26">("12");
   const { data, isPlaceholderData } = useQuery({ ...insightsQuery(Number(range)), placeholderData: (prev) => prev });
-  if (!data) return <Skeleton className="h-96" />;
+  if (!data) return <OverviewSkeleton />;
   return (
-    <div className={cn("space-y-4 transition-opacity", isPlaceholderData && "opacity-60")}>
-      <div className="flex items-center justify-end">
+    // opacity-60 marks stale data while another range loads (a loading state, not styling).
+    <div className={cn("transition-opacity", isPlaceholderData && "opacity-60")}>
+      <div className="mb-4 flex justify-end">
         <Segmented
           size="sm"
           aria-label="Range"
@@ -75,14 +84,31 @@ function Overview() {
           ]}
         />
       </div>
-      <Kpis data={data} />
-      <QuadrantColumns weeks={data.weeks} />
-      <div className="grid gap-4 xl:grid-cols-2">
-        <IntegrityLine weeks={data.weeks} />
-        <FinishedBy data={data} />
+      <div className="space-y-6">
+        <Kpis data={data} />
+        <QuadrantColumns weeks={data.weeks} />
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <IntegrityLine weeks={data.weeks} />
+          <FinishedBy data={data} />
+        </div>
+        <RoleHeatmap weeks={data.weeks} roles={data.roles} />
       </div>
-      <RoleHeatmap weeks={data.weeks} roles={data.roles} />
       <Drift data={data} />
+    </div>
+  );
+}
+
+/** The Overview's shape while the first range loads. */
+function OverviewSkeleton() {
+  return (
+    <div aria-hidden className="space-y-6">
+      <Skeleton className="ml-auto h-8 w-56 max-w-full" />
+      <Skeleton className="h-28 rounded-xl" />
+      <Skeleton className="h-80 rounded-xl" />
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <Skeleton className="h-72 rounded-xl" />
+        <Skeleton className="h-72 rounded-xl max-xl:hidden" />
+      </div>
     </div>
   );
 }
@@ -97,29 +123,34 @@ function Kpis({ data }: { data: Insights }) {
   const avgIntegrity = scored.length ? scored.reduce((s, w) => s + (w.integrity ?? 0), 0) / scored.length : null;
   const planned = weeks.filter((w) => w.status && w.status !== "draft");
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <StatTile
+    // Two across until the content column can hold four readable cells.
+    <StatStrip cols={4} className="sm:grid-cols-2 lg:grid-cols-4">
+      <StatCell
         label="Quadrant II time this week"
         value={hoursLabel(current.byQuadrant.q2)}
-        sub={prev4.length ? `${delta >= 0 ? "+" : "−"}${hoursLabel(Math.abs(Math.round(delta)))} vs previous 4-week average` : "Scheduled in calendar blocks"}
+        hint={prev4.length ? `${delta >= 0 ? "+" : "−"}${hoursLabel(Math.abs(Math.round(delta)))} vs previous 4-week average` : "Scheduled in calendar blocks"}
       />
-      <StatTile
+      <StatCell
         label="Promises kept (last 4 reviews)"
         value={avgIntegrity == null ? "–" : pct(avgIntegrity)}
-        sub={avgIntegrity == null ? "Review a week to see this" : "Done, or consciously set aside for a higher value"}
+        hint={avgIntegrity == null ? "Review a week to see this" : "Done, or consciously set aside for a higher value"}
       />
-      <StatTile label="Weeks planned" value={`${planned.length} of ${weeks.length}`}>
-        <div className="mt-2 flex gap-1" aria-hidden>
-          {weeks.map((w) => (
-            <span
-              key={w.weekStart}
-              className={cn("h-2 flex-1 rounded-full", w.status === "reviewed" ? "bg-primary" : w.status === "planned" ? "bg-primary/50" : "bg-muted")}
-            />
-          ))}
-        </div>
-      </StatTile>
-      <StatTile label="Renewal this week" value={`${current.sawCovered} of 4`} sub="Sharpen-the-saw dimensions with a goal" />
-    </div>
+      <StatCell label="Weeks planned" value={planned.length} unit={`of ${weeks.length}`}>
+        {/* Three levels: reviewed, planned, not planned. */}
+        <MeterSegments
+          total={weeks.length}
+          filled={planned.length}
+          tone="primary"
+          label="Weeks planned"
+          className={cn(weeks.length > 12 && "gap-0.5")}
+          // Planned lifts in dark, where 45% teal on the dark card sits too close to the empty pips.
+          segmentClassName={(i) =>
+            weeks[i].status === "reviewed" ? "bg-primary" : weeks[i].status === "planned" ? "bg-primary/45 dark:bg-primary/65" : "bg-muted"
+          }
+        />
+      </StatCell>
+      <StatCell label="Renewal this week" value={current.sawCovered} unit="of 4" hint="Sharpen-the-saw dimensions with a goal" />
+    </StatStrip>
   );
 }
 
@@ -127,59 +158,78 @@ function FinishedBy({ data }: { data: Insights }) {
   const c = data.completedByCreatedQuadrant;
   const keys = [1, 2, 3, 4] as const;
   const total = keys.reduce((s, q) => s + c[`q${q}`], 0) + c.none;
+  const series = [
+    ...keys.map((q) => ({ key: `q${q}`, label: `Q${QUADRANTS[q].numeral}`, swatch: `var(--q${q})`, fill: QUADRANT_CLASSES[q].solid, n: c[`q${q}`] })),
+    { key: "none", label: "Untriaged", swatch: "var(--viz-axis)", fill: "bg-viz-axis", n: c.none },
+  ];
   return (
-    <section className="rounded-2xl border bg-card p-4">
-      <h2 className="text-sm font-semibold">What you finished, by where it started</h2>
-      <p className="mb-3 text-xs text-muted-foreground">Completed items in this period, grouped by the quadrant they were in when you captured them.</p>
+    <ChartCard
+      title="What you finished, by where it started"
+      subtitle="Completed items in this period, grouped by the quadrant they were in when you captured them."
+      legend={total === 0 ? undefined : series.map((s) => ({ label: s.label, swatch: s.swatch, value: s.n }))}
+      table={<DataTable head={["Started in", "Completed"]} rows={series.map((s) => [s.label, s.n])} />}
+      // The three counts sit under both views, and only once something has been completed.
+      footer={
+        total === 0 ? undefined : (
+          <CardFooter className="mt-3">
+            <dl className="grid w-full grid-cols-3 gap-4">
+              {(
+                [
+                  ["Said no or delegated", data.declined],
+                  ["Active stewardships", data.delegations.active],
+                  ["Concerns acted on", data.concerns.acting + data.concerns.resolved],
+                ] as const
+              ).map(([label, n]) => (
+                <div key={label} className="flex min-w-0 flex-col justify-between gap-0.5">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="text-base font-semibold text-foreground tabular-nums">{n}</dd>
+                </div>
+              ))}
+            </dl>
+          </CardFooter>
+        )
+      }
+    >
       {total === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing completed in this period yet.</p>
+        <EmptyState size="compact" title="Nothing completed in this period yet." className="px-0" />
       ) : (
-        <>
-          <div className="flex h-4 gap-0.5 overflow-hidden rounded-md" aria-hidden>
-            {keys.map((q) =>
-              c[`q${q}`] ? <div key={q} className={QUADRANT_CLASSES[q].solid} style={{ width: `${(c[`q${q}`] / total) * 100}%` }} /> : null,
-            )}
-            {c.none ? <div className="bg-viz-axis" style={{ width: `${(c.none / total) * 100}%` }} /> : null}
-          </div>
-          <ul className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
-            {keys.map((q) => (
-              <li key={q} className="flex items-center gap-1.5">
-                <span aria-hidden className={cn("size-2.5 rounded-sm", QUADRANT_CLASSES[q].solid)} />
-                Q{QUADRANTS[q].numeral} <span className="text-muted-foreground tabular-nums">{c[`q${q}`]}</span>
-              </li>
-            ))}
-            <li className="flex items-center gap-1.5">
-              <span aria-hidden className="size-2.5 rounded-sm bg-viz-axis" /> Untriaged <span className="text-muted-foreground tabular-nums">{c.none}</span>
-            </li>
-          </ul>
-          <p className="mt-3 text-xs text-muted-foreground">
-            Said no or delegated: <span className="font-medium text-foreground">{data.declined}</span> · Active stewardships:{" "}
-            <span className="font-medium text-foreground">{data.delegations.active}</span> · Concerns acted on:{" "}
-            <span className="font-medium text-foreground">{data.concerns.acting + data.concerns.resolved}</span>
-          </p>
-        </>
+        <div className="flex h-3 gap-0.5 overflow-hidden rounded-full" aria-hidden>
+          {series.map((s) => (s.n ? <div key={s.key} className={s.fill} style={{ width: `${(s.n / total) * 100}%` }} /> : null))}
+        </div>
       )}
-    </section>
+    </ChartCard>
   );
 }
 
 function Drift({ data }: { data: Insights }) {
   const { openTask } = useAppState();
+  const { today } = useBootstrap();
   if (data.drift.length === 0) return null;
   return (
-    <section className="rounded-2xl border bg-card p-4">
-      <h2 className="text-sm font-semibold">Quadrant II work that has become urgent</h2>
-      <p className="mb-2 text-xs text-muted-foreground">
-        These started as important-but-not-urgent and are now pressing. Schedule Quadrant II work before it turns into a crisis.
-      </p>
-      <ul className="space-y-1 text-sm">
+    <section className="mt-10 max-w-3xl">
+      <SectionHeader
+        title="Quadrant II work that has become urgent"
+        description="These started as important-but-not-urgent and are now pressing. Schedule Quadrant II work before it turns into a crisis."
+      />
+      <ul className="-mx-3">
         {data.drift.map((d) => (
-          <li key={d.id}>
-            <button type="button" onClick={() => openTask(d.id)} className="hover:underline">
+          <Row as="li" key={d.id} divided className="before:left-3">
+            <RowTitle as="button" onClick={() => openTask(d.id)}>
               {d.title}
-            </button>
-            {d.dueDate && <span className="text-muted-foreground"> · due {d.dueDate}</span>}
-          </li>
+            </RowTitle>
+            {d.dueDate && (
+              <span
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 text-xs tabular-nums [&_svg]:size-3.5",
+                  d.dueDate < today ? "text-warning" : "text-muted-foreground",
+                )}
+              >
+                <CalendarClock aria-hidden />
+                {/* Past due is never colour alone: amber, the icon and "was due". */}
+                {d.dueDate < today ? "was due" : "due"} {fmtDate(d.dueDate)}
+              </span>
+            )}
+          </Row>
         ))}
       </ul>
     </section>

@@ -1,6 +1,8 @@
 import { Auth0Provider, useAuth0 } from "@auth0/auth0-react";
-import { Compass, LogIn } from "lucide-react";
+import { LogIn, TriangleAlert } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { BrandMark } from "@/components/brand-mark";
+import { Callout } from "@/components/surface";
 import { Button } from "@/components/ui/button";
 import { setAuthHandlers } from "./api-fetch";
 
@@ -72,25 +74,27 @@ export function useAccount() {
 
 function Splash() {
   return (
-    <div className="grid min-h-svh place-items-center bg-background text-muted-foreground" aria-busy="true">
-      <Compass className="size-8 animate-pulse text-primary" aria-label="Loading" />
+    <div className="grid min-h-svh place-items-center bg-background" aria-busy="true">
+      <BrandMark size="lg" className="animate-breathe" role="img" aria-label="Loading" />
     </div>
   );
 }
 
 function SignInScreen({ onSignIn, error }: { onSignIn: () => void; error?: string }) {
   return (
-    <main className="grid min-h-svh place-items-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-6 text-center">
-        <div className="mx-auto grid size-12 place-items-center rounded-2xl bg-primary text-primary-foreground">
-          <Compass className="size-6" />
+    <main className="grid min-h-svh place-items-center bg-background px-5">
+      <div className="w-full max-w-sm space-y-8 text-center">
+        <div>
+          <BrandMark size="lg" className="mx-auto" />
+          <h1 className="mt-6 voice-display text-4xl text-foreground">Compass</h1>
+          <p className="mt-2 text-md text-muted-foreground">Put first things first: plan your week around what matters most.</p>
         </div>
-        <div className="space-y-2">
-          <h1 className="compass-display text-4xl">Compass</h1>
-          <p className="text-muted-foreground">Put first things first: plan your week around what matters most.</p>
-        </div>
-        {error && <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
-        <Button size="lg" className="w-full" onClick={onSignIn}>
+        {error && (
+          <Callout tone="danger" icon={<TriangleAlert />} className="text-left">
+            {error}
+          </Callout>
+        )}
+        <Button size="xl" className="w-full" onClick={onSignIn}>
           <LogIn /> Sign in
         </Button>
       </div>

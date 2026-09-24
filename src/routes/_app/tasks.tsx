@@ -1,16 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Plus, Search } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ListChecks, Plus, Search } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 import { QUADRANTS, QUADRANT_ORDER } from "@shared/quadrant.ts";
 import { useAppState } from "@/components/app-state";
 import { QuadrantBadge, RoleDot } from "@/components/badges";
-import { Page, PageHeader } from "@/components/page";
+import { CountBadge } from "@/components/chip";
+import { EmptyState } from "@/components/empty-state";
+import { Page, PageHeader, SectionHeader } from "@/components/page";
+import { QuickAdd } from "@/components/quick-add";
+import { MetaSep } from "@/components/row";
 import { Segmented } from "@/components/segmented";
 import { TaskRow } from "@/components/task-row";
 import { Button } from "@/components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import { Input } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { Task } from "@/lib/api";
 import { useBootstrap } from "@/lib/hooks";
@@ -35,6 +39,16 @@ const VIEW_HINTS: Record<View, string> = {
   dropped: "Things you said no to, delegated, or let go. Saying no to the good makes room for the best.",
 };
 
+/** A group heading: an optional mark in the check column, then the title. */
+type GroupHeading = { icon?: ReactNode; title: ReactNode };
+type Group = { key: string; heading: GroupHeading | null; items: Task[] };
+
+/** A role dot centred over the row checks (20px column), so dots and checks share one axis. */
+const checkAxis = (dot: ReactNode) => <span className="flex w-5 justify-center">{dot}</span>;
+
+/** Loading: row-shaped placeholders, not a spinner. */
+const SKELETON_TITLES = ["w-2/5", "w-3/5", "w-1/3", "w-1/2", "w-2/5", "w-1/4"];
+
 function TasksPage() {
   const { view = "open" } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -51,40 +65,50 @@ function TasksPage() {
     return q ? tasks.filter((t) => t.title.toLowerCase().includes(q) || t.notes.toLowerCase().includes(q)) : tasks;
   }, [tasks, query]);
 
-  const groups = useMemo(() => {
-    if (groupBy === "none") return [{ key: "all", label: null as React.ReactNode, items: filtered }];
+  const groups = useMemo((): Group[] => {
+    if (groupBy === "none") return [{ key: "all", heading: null, items: filtered }];
     if (groupBy === "quadrant") {
       return [
         ...QUADRANT_ORDER.map((q) => ({
           key: `q${q}`,
-          label: (
-            <span className="flex items-center gap-2">
-              <QuadrantBadge q={q} withLabel /> {QUADRANTS[q].label}
-            </span>
-          ) as React.ReactNode,
+          heading: {
+            title: (
+              <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+                <QuadrantBadge q={q} withLabel />
+                {/* The badge already says this to screen readers. The separator keeps it apart from the count. */}
+                <span aria-hidden className="text-xs font-normal text-muted-foreground">
+                  {QUADRANTS[q].label}
+                  <MetaSep className="ml-1.5" />
+                </span>
+              </span>
+            ),
+          },
           items: filtered.filter((t) => t.quadrant === q),
         })),
-        { key: "none", label: "Untriaged", items: filtered.filter((t) => t.quadrant == null) },
+        { key: "none", heading: { title: <QuadrantBadge q={null} /> }, items: filtered.filter((t) => t.quadrant == null) },
       ].filter((g) => g.items.length);
     }
     return [
       ...roles.map((r) => ({
         key: r.id,
-        label: (
-          <span className="flex items-center gap-2">
-            <RoleDot color={r.color} /> {r.name}
-          </span>
-        ) as React.ReactNode,
+        heading: { icon: checkAxis(<RoleDot color={r.color} />), title: r.name },
         items: filtered.filter((t) => t.roleId === r.id),
       })),
-      { key: "none", label: "No role", items: filtered.filter((t) => !t.roleId || !roles.some((r) => r.id === t.roleId)) },
+      {
+        key: "none",
+        heading: { icon: checkAxis(<RoleDot />), title: "No role" },
+        items: filtered.filter((t) => !t.roleId || !roles.some((r) => r.id === t.roleId)),
+      },
     ].filter((g) => g.items.length);
   }, [filtered, groupBy, roles]);
 
+  const inboxCount = counts.inbox ?? 0;
+
   return (
-    <Page>
+    <Page width="medium">
       <PageHeader
-        eyebrow="Habit 3 · Put first things first"
+        habit={3}
+        eyebrow="Put first things first"
         title="Tasks"
         description={VIEW_HINTS[view]}
         actions={
@@ -93,72 +117,111 @@ function TasksPage() {
           </Button>
         }
       />
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <Tabs value={view} onValueChange={(v) => navigate({ search: { view: v as View } })}>
+      <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3">
+        <Tabs value={view} onValueChange={(v) => navigate({ search: { view: v as View } })} className="max-w-full min-w-0">
           <TabsList>
             <TabsTrigger value="open">Open</TabsTrigger>
-            <TabsTrigger value="inbox">Inbox{counts.inbox ? ` · ${counts.inbox}` : ""}</TabsTrigger>
+            <TabsTrigger value="inbox">
+              Inbox {inboxCount > 0 && <CountBadge count={inboxCount} attention />}
+            </TabsTrigger>
             <TabsTrigger value="backlog">Backlog</TabsTrigger>
             <TabsTrigger value="done">Done</TabsTrigger>
             <TabsTrigger value="dropped">Said no</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Segmented<GroupBy>
-          size="sm"
-          value={groupBy}
-          onChange={setGroupBy}
-          aria-label="Group by"
-          options={[
-            { value: "role", label: "By role" },
-            { value: "quadrant", label: "By quadrant" },
-            { value: "none", label: "Flat" },
-          ]}
-        />
-        <div className="relative ml-auto w-full sm:w-64">
-          <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" className="pl-8" />
+        {/* Grows into the rest of the line: beside the tabs when they fit, else its own row (group by left, search right). */}
+        <div className="flex w-full items-center gap-2 sm:w-auto sm:grow">
+          <Segmented<GroupBy>
+            size="sm"
+            value={groupBy}
+            onChange={setGroupBy}
+            aria-label="Group by"
+            className="shrink-0"
+            options={[
+              { value: "role", label: "By role" },
+              { value: "quadrant", label: "By quadrant" },
+              { value: "none", label: "Flat" },
+            ]}
+          />
+          <InputGroup className="w-full sm:ml-auto sm:w-60">
+            <InputGroupAddon>
+              <Search aria-hidden />
+            </InputGroupAddon>
+            <InputGroupInput value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" aria-label="Search tasks" />
+          </InputGroup>
         </div>
       </div>
 
       {(view === "open" || view === "inbox") && (
-        <form
-          className="mb-4 flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
+        <QuickAdd
+          className="mb-6"
+          value={quick}
+          onValueChange={setQuick}
+          onSubmit={() => {
             if (!quick.trim()) return;
             create.mutate({ title: quick.trim(), source: "capture" });
             setQuick("");
           }}
-        >
-          <Input value={quick} onChange={(e) => setQuick(e.target.value)} placeholder="Quick add to inbox (triage later)…" />
-          <Button type="submit" variant="outline" disabled={!quick.trim()}>
-            Add
-          </Button>
-        </form>
+          placeholder="Quick add to inbox (triage later)…"
+          aria-label="Quick add to inbox"
+        />
       )}
 
-      {!isLoading && filtered.length === 0 ? (
-        <Empty className="border">
-          <EmptyHeader>
-            <EmptyTitle>{view === "inbox" ? "Inbox zero" : "Nothing here"}</EmptyTitle>
-            <EmptyDescription>
-              {view === "inbox" ? "Everything you've captured has been triaged." : "Capture something with N, or change the view."}
-            </EmptyDescription>
-          </EmptyHeader>
-        </Empty>
+      {isLoading ? (
+        // The same geometry as a group heading and its TaskRows, so nothing jumps when the data lands.
+        <div aria-hidden>
+          {groupBy !== "none" && (
+            <div className="mb-1 flex h-10 items-center gap-3">
+              {groupBy === "quadrant" ? (
+                <Skeleton className="h-5 w-24 rounded-full" />
+              ) : (
+                <>
+                  {checkAxis(<Skeleton className="size-2 rounded-full" />)}
+                  <Skeleton className="h-4 w-32" />
+                </>
+              )}
+            </div>
+          )}
+          <div className="-mx-3">
+            {SKELETON_TITLES.map((w, i) => (
+              <div key={i} className="@container flex h-10 items-center gap-3 px-3 pointer-coarse:h-12">
+                <Skeleton className="size-5 shrink-0 rounded-full" />
+                <div className="min-w-0 flex-1">
+                  <Skeleton className={`h-3.5 ${w}`} />
+                </div>
+                {groupBy !== "quadrant" && <Skeleton className="h-5 w-11 shrink-0 rounded-full" />}
+                {/* The day, due and estimate columns (w-20, w-24, w-12 and their gaps), shown when the row is wide. */}
+                <div className="hidden w-62 shrink-0 @2xl:block" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<ListChecks />}
+          title={view === "inbox" ? "Inbox zero" : "Nothing here"}
+          description={view === "inbox" ? "Everything you've captured has been triaged." : "Capture something with N, or change the view."}
+          action={
+            <Button variant="outline" size="sm" onClick={() => openCapture()}>
+              <Plus /> Capture
+            </Button>
+          }
+        />
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-8">
           {groups.map((g) => (
             <section key={g.key}>
-              {g.label && (
-                <h2 className="mb-1 flex items-center justify-between px-2 text-sm font-semibold">
-                  {g.label}
-                  <span className="text-xs font-normal text-muted-foreground">{g.items.length}</span>
-                </h2>
+              {g.heading && (
+                <SectionHeader
+                  title={g.heading.title}
+                  icon={g.heading.icon}
+                  count={g.items.length}
+                  className="sticky top-12 z-10 -mx-3 mb-1 gap-3 bg-background/90 px-3 py-2 backdrop-blur-md"
+                />
               )}
-              <div className="rounded-xl border bg-card p-1">
-                {g.items.map((t: Task) => (
-                  <TaskRow key={t.id} task={t} showQuadrant={groupBy !== "quadrant"} />
+              <div className="-mx-3">
+                {g.items.map((t) => (
+                  <TaskRow key={t.id} task={t} showQuadrant={groupBy !== "quadrant"} showRole={groupBy !== "role"} />
                 ))}
               </div>
             </section>

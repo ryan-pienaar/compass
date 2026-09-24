@@ -2,6 +2,8 @@
 
 Compass is a hosted, multi-user planner (Habits 1–3 of *The 7 Habits*): a Vite SPA and a Hono API on Vercel, Supabase Postgres, Auth0 sign-in. Read `docs/PLAN.md` for the product rules, `docs/PRINCIPLES.md` for the principle-to-feature map and `docs/DEPLOY.md` for hosting before changing behaviour. The deployment is production; don't add anything that weakens auth or data isolation in production builds.
 
+Read `docs/DESIGN.md` before changing any UI: it is the design system (tokens, components, motion, accessibility, per-screen rules).
+
 ## Commands
 
 - `pnpm dev`: Vite (5173) + API (4318, `--dev`). Without `.env.local`: in-process Postgres (PGlite) in `./data/pglite` and a local user without sign-in.

@@ -1,7 +1,14 @@
-/** Vertical scale of the time grid. */
-export const HOUR_PX = 40;
+/** Vertical scale of the time grid: 56px an hour, so a 15-minute block is 14px and a half hour 28px. */
+export const HOUR_PX = 56;
 export const PX_PER_MIN = HOUR_PX / 60;
 export const SNAP_MIN = 15;
+/** The shortest a block is drawn, so a 15-minute block still shows its title (DESIGN.md §10 Week). */
+export const MIN_BLOCK_PX = 20;
+
+/** Drawn height of a block of `minutes`: 2px shorter than its slot, so stacked blocks never touch. */
+export function blockHeight(minutes: number) {
+  return Math.max(MIN_BLOCK_PX, minutes * PX_PER_MIN - 2);
+}
 
 export function minuteToY(min: number, dayStartMin: number) {
   return (min - dayStartMin) * PX_PER_MIN;

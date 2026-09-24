@@ -16,30 +16,50 @@ import { clamp, yToMinute } from "./layout";
 import { DragPreview, useColumnRegistry, WeekGrid, type DragData, type DropData, type HoverSlot } from "./week-grid";
 
 const RANK: Record<string, number> = { A: 0, B: 1, C: 2 };
+
 const byPriority = (a: Task, b: Task) =>
   (a.priority ? RANK[a.priority] : 3) - (b.priority ? RANK[b.priority] : 3) ||
   Number(b.kind === "goal") - Number(a.kind === "goal") ||
   a.sortOrder - b.sortOrder;
 
 /**
+ * The tray is a rail beside the grid from `lg` (16rem; 18rem from `2xl`, so all seven days still fit
+ * at 1280px with the sidebar open), and sits above it on smaller screens.
+ */
+const PLANNER_LAYOUT = "grid grid-cols-1 gap-4 lg:grid-cols-[16rem_minmax(0,1fr)] 2xl:grid-cols-[18rem_minmax(0,1fr)]";
+
+/**
  * Covey's weekly worksheet, interactive: roles and big rocks on the left,
  * seven days on the right. Rocks go in first: onto a day as a priority, or
  * (better) onto a time as an appointment.
  */
-export function WeekPlanner({ start, height = "calc(100svh - 13rem)", className }: { start: string; height?: string; className?: string }) {
+export function WeekPlanner({
+  start,
+  height = "max(calc(100svh - 22.875rem), 34rem)",
+  stackedHeight = height,
+  className,
+}: {
+  start: string;
+  /** Height of the tray and the grid side by side, from `lg`. */
+  height?: string;
+  /** Height of the grid below `lg`, where the tray stacks above it. */
+  stackedHeight?: string;
+  className?: string;
+}) {
   const { data: board } = useQuery(weekQuery(start));
+  const heights = { "--week-h": height, "--week-h-stacked": stackedHeight } as CSSProperties;
   if (!board) {
     return (
-      <div className={cn("grid gap-3 lg:grid-cols-[280px_minmax(0,1fr)]", className)}>
-        <Skeleton style={{ height }} />
-        <Skeleton style={{ height }} />
+      <div className={cn(PLANNER_LAYOUT, className)} style={heights}>
+        <Skeleton className="h-60 rounded-xl lg:h-(--week-h)" />
+        <Skeleton className="h-(--week-h-stacked) min-h-80 rounded-xl lg:h-(--week-h)" />
       </div>
     );
   }
-  return <Planner board={board} start={start} height={height} className={className} />;
+  return <Planner board={board} start={start} heights={heights} className={className} />;
 }
 
-function Planner({ board, start, height, className }: { board: WeekBoard; start: string; height: string; className?: string }) {
+function Planner({ board, start, heights, className }: { board: WeekBoard; start: string; heights: CSSProperties; className?: string }) {
   const qc = useQueryClient();
   const { today } = useBootstrap();
   const { openTask } = useAppState();
@@ -50,6 +70,8 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
   const [hover, setHover] = useState<HoverSlot | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [blockDraft, setBlockDraft] = useState<BlockDraft | null>(null);
+  // Width of the dragged block's day column, read when the drag starts, so the preview keeps the block's shape.
+  const [previewWidth, setPreviewWidth] = useState<number | null>(null);
   const grab = useRef<number | null>(null);
 
   const rolesById = useMemo(() => new Map(board.roles.map((r) => [r.id, r])), [board.roles]);
@@ -105,6 +127,7 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
         blockActions.remove.mutate(b.id, {
           onSuccess: () =>
             toast("Time block removed", {
+              duration: 10_000,
               action: {
                 label: "Undo",
                 onClick: () =>
@@ -195,6 +218,7 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
         if (data?.kind === "block" && source?.element) {
           grab.current = event.operation.position.current.y - source.element.getBoundingClientRect().top;
         }
+        setPreviewWidth(data?.kind === "block" ? (cols.map.current.get(data.block.date)?.getBoundingClientRect().width ?? null) : null);
       }}
       onDragMove={(event) => {
         const data = event.operation.source?.data as DragData | undefined;
@@ -217,7 +241,7 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
         handleDrop(data, target, y);
       }}
     >
-      <div className={cn("grid gap-3 lg:grid-cols-[280px_minmax(0,1fr)]", className)} style={{ "--week-h": height } as CSSProperties}>
+      <div className={cn(PLANNER_LAYOUT, className)} style={heights}>
         <GoalTray
           board={board}
           draggingId={draggingId}
@@ -227,7 +251,7 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
           className="max-h-[70svh] lg:h-(--week-h) lg:max-h-none"
         />
         <WeekGrid
-          className="h-(--week-h) min-h-80"
+          className="h-(--week-h-stacked) min-h-80 lg:h-(--week-h)"
           days={board.days}
           today={today}
           dayStartHour={board.settings.dayStartHour}
@@ -262,7 +286,12 @@ function Planner({ board, start, height, className }: { board: WeekBoard; start:
           onToggleBlockDone={(b) => blockActions.update.mutate({ id: b.id, status: b.status === "done" ? "planned" : "done" })}
         />
       </div>
-      <DragOverlay dropAnimation={null}>{(source) => <DragPreview data={source?.data as DragData | undefined} rolesById={rolesById} />}</DragOverlay>
+      {/* No drop animation: a rock dropped on the grid becomes a new block, so the preview has no source to settle into.
+          The wrapper is sized to the source, not the preview; under reduced motion the global drag rule would give
+          it a shadow of its own (a phantom box), so only the preview inside carries the lift. */}
+      <DragOverlay dropAnimation={null} style={{ boxShadow: "none" }}>
+        {(source) => <DragPreview data={source?.data as DragData | undefined} rolesById={rolesById} columnWidth={previewWidth} />}
+      </DragOverlay>
       <BlockDialog
         draft={blockDraft}
         onClose={() => setBlockDraft(null)}

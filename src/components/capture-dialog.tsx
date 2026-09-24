@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { CornerDownLeft, Hand, Mountain } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Ban, CalendarClock, Hand, HeartHandshake, Mountain } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { effectiveTriage, isDueSoon, QUADRANTS, urgencyToStore, type Quadrant } from "@shared/quadrant.ts";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/kbd";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { api, call } from "@/lib/api";
@@ -16,10 +17,12 @@ import { useApiMutation, useTaskActions, type TaskCreate } from "@/lib/mutations
 import { weekQuery } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useAppState } from "./app-state";
-import { QUADRANT_CLASSES, QuadrantBadge } from "./badges";
+import { QuadrantDot } from "./badges";
+import { ChoiceChip } from "./chip";
 import { LanguageHint } from "./language-hint";
 import { DateField, GoalSelect, RoleSelect } from "./pickers";
 import { Segmented } from "./segmented";
+import { Callout } from "./surface";
 
 type YesNo = "yes" | "no" | "unsure";
 type Response = "inbox" | "today" | "schedule" | "rock" | "backlog" | "delegate" | "batch" | "decline" | "drop" | "keep";
@@ -28,7 +31,7 @@ export function CaptureDialog() {
   const { capture, closeCapture } = useAppState();
   return (
     <Dialog open={capture.open} onOpenChange={(o) => !o && closeCapture()}>
-      <DialogContent className="top-[6vh] max-h-[88vh] translate-y-0 overflow-y-auto sm:max-w-2xl" showCloseButton>
+      <DialogContent size="lg" placement="top" showCloseButton>
         {capture.open && <CaptureForm key={JSON.stringify(capture.prefill)} onDone={closeCapture} />}
       </DialogContent>
     </Dialog>
@@ -41,6 +44,7 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
   const { today, weekStart, settings } = useBootstrap();
   const { create } = useTaskActions();
   const titleRef = useRef<HTMLInputElement>(null);
+  const uid = useId();
 
   const [title, setTitle] = useState(prefill.title ?? "");
   const [roleId, setRoleId] = useState<string | null>(prefill.roleId ?? null);
@@ -192,11 +196,14 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
         e.preventDefault();
         void submit(primary.response);
       }}
-      className="grid gap-4"
+      className="grid gap-5"
     >
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <Hand className="size-4 text-primary" />
+        <DialogTitle className="flex items-start gap-2">
+          {/* One line-height tall, so the icon stays on the first line when the title wraps. */}
+          <span aria-hidden className="flex h-lh shrink-0 items-center">
+            <Hand className="size-4 text-muted-foreground" />
+          </span>
           {prefill.mode === "interruption" ? "Something came up. Pause." : "Capture, then choose your response"}
         </DialogTitle>
         <DialogDescription>
@@ -205,35 +212,33 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
       </DialogHeader>
 
       <div className="grid gap-2">
-        <Input
-          ref={titleRef}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="What is it?"
-          className="h-10 text-base"
-          aria-label="Title"
-        />
-        <LanguageHint text={title} onChange={setTitle} />
+        <Input ref={titleRef} size="lg" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What is it?" aria-label="Title" />
+        <LanguageHint text={title} onChange={setTitle} returnFocusRef={titleRef} />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Which role does it serve?</Label>
-          <RoleSelect value={roleId} onChange={pickRole} placeholder="None / not sure" size="sm" className="w-full" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-1.5">
+          <Label size="sm" htmlFor={`${uid}-role`}>
+            Which role does it serve?
+          </Label>
+          <RoleSelect id={`${uid}-role`} value={roleId} onChange={pickRole} placeholder="None / not sure" className="w-full" />
         </div>
-        <div className="grid gap-1.5">
-          <Label className="text-xs text-muted-foreground">Toward a long-term goal?</Label>
-          <GoalSelect value={goalId} onChange={pickGoal} roleId={roleId} size="sm" className="w-full" />
+        <div className="grid min-w-0 gap-1.5">
+          <Label size="sm" htmlFor={`${uid}-goal`}>
+            Toward a long-term goal?
+          </Label>
+          <GoalSelect id={`${uid}-goal`} value={goalId} onChange={pickGoal} roleId={roleId} className="w-full" />
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border bg-muted/30 p-3 sm:grid-cols-2">
-        <div className="grid gap-1.5">
-          <div className="text-sm font-medium">Is it important?</div>
-          <p className="text-xs text-muted-foreground">Does it contribute to your mission, a role or a goal?</p>
+      <div className="grid gap-4 border-t border-border-subtle pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1 basis-56">
+            <p className="text-sm font-medium">Is it important?</p>
+            <p className="text-xs text-muted-foreground">Does it contribute to your mission, a role or a goal?</p>
+          </div>
           <Segmented
             aria-label="Important"
-            size="sm"
             value={important}
             onChange={setImportant}
             options={[
@@ -243,13 +248,14 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
             ]}
           />
         </div>
-        <div className="grid gap-1.5">
-          <div className="text-sm font-medium">Is it urgent?</div>
-          <p className="text-xs text-muted-foreground">Does it truly need attention now, or soon, because of a deadline?</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0 flex-1 basis-56">
+            <p className="text-sm font-medium">Is it urgent?</p>
+            <p className="text-xs text-muted-foreground">Does it truly need attention now, or soon, because of a deadline?</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Segmented
               aria-label="Urgent"
-              size="sm"
               value={urgentChoice ?? (dueSoon ? "yes" : "no")}
               onChange={setUrgentChoice}
               options={[
@@ -257,7 +263,7 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
                 { value: "no", label: "No" },
               ]}
             />
-            <DateField value={dueDate} onChange={setDueDate} placeholder="Deadline" size="sm" />
+            <DateField value={dueDate} onChange={setDueDate} placeholder="Deadline" />
           </div>
         </div>
       </div>
@@ -265,7 +271,7 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
       <QuadrantGuidance q={q} urgentReason={triage.urgentReason} />
 
       {q === 1 && (
-        <label className="flex items-center gap-2 text-sm">
+        <label className="flex items-center gap-2.5 text-sm">
           <Checkbox checked={prevent} onCheckedChange={(v) => setPrevent(v === true)} />
           Also add a Quadrant II step to stop this happening again
         </label>
@@ -274,9 +280,9 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
       {q === 2 && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="text-muted-foreground">Schedule it:</span>
-          <DateField value={scheduleDate} onChange={setScheduleDate} placeholder="Pick a day" size="sm" />
+          <DateField value={scheduleDate} onChange={setScheduleDate} placeholder="Pick a day" />
           <span className="text-muted-foreground">or</span>
-          <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => void submit("rock")}>
+          <Button type="button" variant="outline" disabled={busy} onClick={() => void submit("rock")}>
             <Mountain /> Make it a big rock this week
           </Button>
         </div>
@@ -284,32 +290,49 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
 
       {q === 3 && (
         <div className="grid gap-3">
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" variant={panel === "delegate" ? "secondary" : "outline"} onClick={() => setPanel(panel === "delegate" ? "none" : "delegate")}>
+          <div role="group" aria-label="How to respond" className="flex flex-wrap gap-2">
+            <ChoiceChip
+              pressed={panel === "delegate"}
+              icon={<HeartHandshake aria-hidden />}
+              onClick={() => setPanel(panel === "delegate" ? "none" : "delegate")}
+            >
               Delegate as a stewardship
-            </Button>
-            <Button type="button" size="sm" variant={panel === "decline" ? "secondary" : "outline"} onClick={() => setPanel(panel === "decline" ? "none" : "decline")}>
+            </ChoiceChip>
+            <ChoiceChip pressed={panel === "decline"} icon={<Ban aria-hidden />} onClick={() => setPanel(panel === "decline" ? "none" : "decline")}>
               Decline pleasantly
-            </Button>
+            </ChoiceChip>
           </div>
           {panel === "delegate" && (
-            <div className="grid gap-2 rounded-lg border p-3 sm:grid-cols-[1fr_2fr_auto]">
-              <Input placeholder="Who?" value={delegate.who} onChange={(e) => setDelegate({ ...delegate, who: e.target.value })} />
-              <Input
-                placeholder="Desired result (what, not how) and by when"
-                value={delegate.result}
-                onChange={(e) => setDelegate({ ...delegate, result: e.target.value })}
-              />
-              <Input
-                type="number"
-                min={1}
-                className="w-24"
-                aria-label="Check in every N days"
-                title="Check in every N days"
-                value={delegate.checkin}
-                onChange={(e) => setDelegate({ ...delegate, checkin: e.target.value })}
-              />
-              <p className="text-xs text-muted-foreground sm:col-span-3">
+            <div className="grid gap-3 rounded-lg bg-muted p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+              <div className="grid min-w-0 gap-1.5">
+                <Label size="sm" htmlFor={`${uid}-who`}>
+                  Who?
+                </Label>
+                <Input id={`${uid}-who`} value={delegate.who} onChange={(e) => setDelegate({ ...delegate, who: e.target.value })} />
+              </div>
+              <div className="grid min-w-0 gap-1.5">
+                <Label size="sm" htmlFor={`${uid}-result`}>
+                  Desired result (what, not how) and by when
+                </Label>
+                <Input id={`${uid}-result`} value={delegate.result} onChange={(e) => setDelegate({ ...delegate, result: e.target.value })} />
+              </div>
+              {/* Reads as one phrase: "Check in every [7] days". */}
+              <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground sm:col-span-2">
+                <Label size="sm" htmlFor={`${uid}-checkin`}>
+                  Check in every
+                </Label>
+                <Input
+                  id={`${uid}-checkin`}
+                  type="number"
+                  min={1}
+                  className="w-16 tabular-nums"
+                  aria-label="Check in every N days"
+                  value={delegate.checkin}
+                  onChange={(e) => setDelegate({ ...delegate, checkin: e.target.value })}
+                />
+                <span aria-hidden>days</span>
+              </div>
+              <p className="text-xs text-muted-foreground sm:col-span-2">
                 You can add guidelines, resources, accountability and consequences later under Stewardships.
               </p>
             </div>
@@ -318,62 +341,95 @@ function CaptureForm({ onDone }: { onDone: () => void }) {
       )}
 
       {(q === 3 || q === 4) && (panel === "decline" || q === 4) && (
-        <div className="grid gap-2">
+        <div className="grid gap-3">
           {biggerYes.length > 0 && (
-            <div className="rounded-lg bg-accent/50 p-3 text-sm">
-              <div className="mb-1 font-medium text-accent-foreground">Your bigger yes this week</div>
-              <ul className="list-inside list-disc text-accent-foreground/90">
+            <Callout tone="neutral" icon={<Mountain aria-hidden />} title="Your bigger yes this week">
+              <ul className="mt-1 ml-4 list-disc space-y-0.5 marker:text-muted-foreground">
                 {biggerYes.map((g) => (
                   <li key={g.id}>{g.title}</li>
                 ))}
               </ul>
-            </div>
+            </Callout>
           )}
           {panel === "decline" && (
             <Textarea
               rows={2}
               value={declineNote}
               onChange={(e) => setDeclineNote(e.target.value)}
+              aria-label="How you'll say no"
               placeholder="How you'll say no: pleasantly, smilingly, without apology (optional)"
             />
           )}
         </div>
       )}
 
-      <DialogFooter className="items-center sm:justify-between">
-        <div className="hidden items-center gap-1 text-xs text-muted-foreground sm:flex">
-          {q != null && <QuadrantBadge q={q} withLabel />}
-          {q == null && <span>Not triaged yet: it'll wait in your inbox.</span>}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {q != null && primary.response !== "keep" && (
-            <Button type="button" variant="ghost" disabled={busy} onClick={() => void submit(q === 4 ? "keep" : "inbox")}>
-              {q === 4 ? "Keep anyway" : "Just save it"}
-            </Button>
-          )}
-          <Button type="submit" disabled={busy || !title.trim()}>
-            {primary.label}
-            <CornerDownLeft className="opacity-60" />
+      <DialogFooter
+        start={
+          <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:pointer-fine:inline-flex">
+            <Kbd>Esc</Kbd> to cancel
+          </span>
+        }
+      >
+        {q != null && primary.response !== "keep" && (
+          <Button type="button" variant="ghost" disabled={busy} onClick={() => void submit(q === 4 ? "keep" : "inbox")}>
+            {q === 4 ? "Keep anyway" : "Just save it"}
           </Button>
-        </div>
+        )}
+        <Button type="submit" disabled={busy || !title.trim()}>
+          {primary.label}
+          <Kbd className="pointer-coarse:hidden">↵</Kbd>
+        </Button>
       </DialogFooter>
     </form>
   );
 }
 
+/** The quadrant's top rule on the verdict card (literal strings so Tailwind generates them). */
+const TOP_RULE: Record<Quadrant, string> = {
+  1: "before:bg-q1",
+  2: "before:bg-q2",
+  3: "before:bg-q3",
+  4: "before:bg-q4",
+};
+
+/** The verdict: which quadrant the answers point to, and what to do about it. It re-enters as the quadrant changes. */
 function QuadrantGuidance({ q, urgentReason }: { q: Quadrant | null; urgentReason: "flag" | "due" | null }) {
-  if (!q) return null;
-  const info = QUADRANTS[q];
-  const c = QUADRANT_CLASSES[q];
+  const info = q ? QUADRANTS[q] : null;
   return (
-    <div className={cn("rounded-xl border p-3", c.bg, c.border)}>
-      <div className="flex items-center gap-1.5 text-sm font-semibold">
-        <span aria-hidden className={cn("size-2 rounded-full", c.solid)} />
-        Quadrant {info.numeral} · {info.verb}
-        <span className="ml-2 font-normal text-foreground/70">{info.label}</span>
+    <div
+      className={cn(
+        "relative overflow-hidden rounded-xl bg-card px-4 py-3.5 shadow-xs ring-1 ring-edge dark:bg-muted before:absolute before:inset-x-0 before:top-0 before:h-0.75",
+        q ? TOP_RULE[q] : "before:bg-border-strong",
+      )}
+    >
+      <div key={q ?? "none"} className="animate-rise-in">
+        {q && info ? (
+          <>
+            <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm">
+              <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                <QuadrantDot q={q} />
+                Quadrant {info.numeral} · {info.verb}
+              </span>
+              <span className="text-muted-foreground">{info.label}</span>
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{info.guidance}</p>
+            {urgentReason === "due" && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <CalendarClock aria-hidden className="size-3.5 shrink-0" />
+                Urgent because the deadline is close.
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <span aria-hidden className="size-2 shrink-0 rounded-full inset-ring inset-ring-control" />
+              Untriaged
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">Not triaged yet: it'll wait in your inbox.</p>
+          </>
+        )}
       </div>
-      <p className="mt-1 text-sm text-foreground/80">{info.guidance}</p>
-      {urgentReason === "due" && <p className="mt-1 text-xs text-foreground/60">Urgent because the deadline is close.</p>}
     </div>
   );
 }

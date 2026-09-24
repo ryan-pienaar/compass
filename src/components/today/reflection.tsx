@@ -1,8 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import { Moon, Sprout } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { LanguageHint } from "@/components/language-hint";
+import { SectionHeader } from "@/components/page";
+import { SaveStatus } from "@/components/save-status";
 import { Segmented } from "@/components/segmented";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,14 +44,17 @@ export function EveningReflection({ date, entry }: { date: string; entry: Journa
   const pending = useAutosave(d, (v) => save.mutate(v), 900);
 
   return (
-    <section className="rounded-xl border bg-card p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Moon className="size-4 text-primary" /> Evening reflection
-        </h2>
-        <span className="text-xs text-muted-foreground">{pending ? "Saving…" : save.isSuccess ? "Saved to your journal" : "Optional · 3 minutes"}</span>
-      </div>
-      <div className="grid gap-3 md:grid-cols-3">
+    <Card render={<section />}>
+      <CardHeader className="items-center">
+        <CardTitle as="h2" className="flex items-center gap-2">
+          <Moon aria-hidden className="size-4 text-muted-foreground" /> Evening reflection
+        </CardTitle>
+        <CardAction>
+          <SaveStatus saving={pending} label={save.isSuccess ? "Saved to your journal" : "Optional · 3 minutes"} />
+        </CardAction>
+      </CardHeader>
+      {/* Each prompt spans three shared rows (label, field, hint), so the fields line up however the labels wrap. */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Prompt label="What went well?" value={d.wentWell} onChange={(wentWell) => setD({ ...d, wentWell })} />
         <Prompt
           label="Where was I reactive? What will I choose next time?"
@@ -60,15 +67,18 @@ export function EveningReflection({ date, entry }: { date: string; entry: Journa
           onChange={(mistake) => setD({ ...d, mistake })}
         />
       </div>
-    </section>
+    </Card>
   );
 }
 
 function Prompt({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const id = useId();
   return (
-    <div className="grid content-start gap-1.5">
-      <Label className="text-xs leading-snug text-muted-foreground">{label}</Label>
-      <Textarea rows={3} value={value} onChange={(e) => onChange(e.target.value)} className="compass-text !text-sm" />
+    <div className="grid min-w-0 content-start gap-2 lg:row-span-3 lg:grid-rows-subgrid">
+      <Label size="sm" htmlFor={id} className="self-end">
+        {label}
+      </Label>
+      <Textarea id={id} rows={3} voice="sm" value={value} onChange={(e) => onChange(e.target.value)} />
       <LanguageHint text={value} onChange={onChange} />
     </div>
   );
@@ -88,6 +98,7 @@ export function ChallengeCheckin({
 }) {
   const day = challenge.today;
   const [commitment, setCommitment] = useState(day?.commitment ?? "");
+  const commitmentId = useId();
   const save = useApiMutation(
     (patch: Partial<Pick<ChallengeDay, "commitment" | "kept" | "inInfluence" | "proactiveLanguage" | "ownedMistakes">>) =>
       call(api.challenge[":id"].days[":date"].$put({ param: { id: challenge.id, date }, json: patch })),
@@ -103,25 +114,34 @@ export function ChallengeCheckin({
   ];
 
   return (
-    <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-      <div className="mb-2 flex items-center justify-between">
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
-          <Sprout className="size-4 text-primary" /> 30-day proactivity test · day {challenge.dayNumber}
-        </h2>
-        <Link to="/influence" search={{ tab: "challenge" }} className="text-xs text-muted-foreground underline">
-          See all days
-        </Link>
+    <Card size="sm" render={<section />}>
+      <SectionHeader
+        className="mb-0"
+        icon={<Sprout />}
+        title={
+          <>
+            30-day proactivity test <span className="font-normal text-muted-foreground tabular-nums">· day {challenge.dayNumber}</span>
+          </>
+        }
+        action={
+          <Button variant="link" size="inline" className="text-xs" render={<Link to="/influence" search={{ tab: "challenge" }} />}>
+            See all days
+          </Button>
+        }
+      />
+      <div className="grid max-w-xl gap-2">
+        <Label size="sm" htmlFor={commitmentId}>
+          One small commitment for today
+        </Label>
+        <Input id={commitmentId} value={commitment} onChange={(e) => setCommitment(e.target.value)} placeholder="e.g. No complaining in the team channel" />
       </div>
-      <div className="grid gap-1.5">
-        <Label className="text-xs text-muted-foreground">One small commitment for today</Label>
-        <Input value={commitment} onChange={(e) => setCommitment(e.target.value)} placeholder="e.g. No complaining in the team channel" />
-      </div>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-10 gap-y-1 lg:grid-cols-2">
         {questions.map((q) => (
-          <div key={q.key} className="flex items-center justify-between gap-2 text-sm">
-            <span>{q.label}</span>
+          <div key={q.key} className="flex min-h-10 items-center justify-between gap-3 text-sm">
+            <span className="min-w-0">{q.label}</span>
             <Segmented<Tri>
               size="sm"
+              aria-label={q.label}
               value={toTri(day?.[q.key])}
               onChange={(v) => save.mutate({ [q.key]: fromTri(v) })}
               options={[
@@ -132,6 +152,6 @@ export function ChallengeCheckin({
           </div>
         ))}
       </div>
-    </section>
+    </Card>
   );
 }

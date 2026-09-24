@@ -1,16 +1,24 @@
 import { CollisionPriority } from "@dnd-kit/abstract";
 import { move } from "@dnd-kit/helpers";
-import { DragDropProvider, useDroppable } from "@dnd-kit/react";
+import { DragDropProvider, useDragOperation, useDroppable } from "@dnd-kit/react";
 import { useSortable } from "@dnd-kit/react/sortable";
-import { ArrowRightFromLine, Check, Crosshair, GripVertical, Mountain, Plus } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRightFromLine, CalendarClock, Crosshair, GripVertical, Mountain } from "lucide-react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { addDaysISO } from "@shared/dates.ts";
 import { useAppState } from "@/components/app-state";
 import { QuadrantBadge, RoleDot } from "@/components/badges";
+import { ChoiceChip } from "@/components/chip";
+import { DoneCheck } from "@/components/done-check";
+import { IconButton } from "@/components/icon-button";
+import { Meter } from "@/components/meter";
+import { GroupLabel } from "@/components/page";
 import { DateField } from "@/components/pickers";
+import { QuickAdd } from "@/components/quick-add";
+import { MetaSep, Row, RowActions, RowMeta, RowTitle } from "@/components/row";
+import { dropZone } from "@/components/surface";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card, CardAction, CardHeader, CardTitle } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { api, call, type Task } from "@/lib/api";
 import { relativeDay } from "@/lib/format";
@@ -70,13 +78,18 @@ export function Priorities({ date, items }: { date: string; items: Task[] }) {
   const done = items.filter((t) => t.status === "done").length;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm font-semibold">Today&apos;s priorities</h2>
-        <span className="text-xs text-muted-foreground tabular-nums">
-          {done}/{items.length} done
-        </span>
-      </div>
+    <Card>
+      <CardHeader className="items-center">
+        <CardTitle as="h2">Today&apos;s priorities</CardTitle>
+        {items.length > 0 && (
+          <CardAction>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {done} of {items.length}
+            </span>
+            <Meter className="w-16" size="sm" value={done / items.length} label="Priorities done" />
+          </CardAction>
+        )}
+      </CardHeader>
       <DragDropProvider
         onDragStart={() => {
           dragging.current = true;
@@ -92,12 +105,12 @@ export function Priorities({ date, items }: { date: string; items: Task[] }) {
           persist(latest.current);
         }}
       >
-        <div className="space-y-2">
+        <div className="space-y-3">
           {GROUPS.map((grp) => {
             const ids = groups[grp.key];
             if (grp.key === "none" && ids.length === 0) return null;
             return (
-              <GroupColumn key={grp.key} group={grp.key} label={grp.label} hint={grp.hint} empty={ids.length === 0}>
+              <GroupColumn key={grp.key} group={grp.key} label={grp.label} hint={grp.hint} ids={ids}>
                 {ids.map((id, index) => {
                   const t = byId.get(id);
                   return t ? <PriorityItem key={id} task={t} index={index} group={grp.key} date={date} /> : null;
@@ -108,81 +121,103 @@ export function Priorities({ date, items }: { date: string; items: Task[] }) {
         </div>
       </DragDropProvider>
       <AddPriority onAdd={(title) => create.mutate({ title, scheduledDate: date, priority: "B", source: "today" })} />
-    </div>
+    </Card>
   );
 }
 
-function GroupColumn({ group, label, hint, empty, children }: { group: Group; label: string; hint: string; empty: boolean; children: React.ReactNode }) {
+function GroupColumn({ group, label, hint, ids, children }: { group: Group; label: string; hint: string; ids: string[]; children: React.ReactNode }) {
   // The id must equal the group key: move() uses it to drop into an empty group.
   const { ref, isDropTarget } = useDroppable({ id: group, type: "column", accept: "item", collisionPriority: CollisionPriority.Low });
+  // Visual only: while a priority is dragged every group shows it can take it, and the group
+  // holding it (move() re-homes it on drag over) or under the pointer is marked as the target.
+  const { source } = useDragOperation();
+  const holdsSource = source != null && ids.includes(String(source.id));
+  const state = isDropTarget || holdsSource ? "over" : source ? "available" : "idle";
   return (
-    <section
-      ref={ref}
-      className={cn("rounded-xl border bg-card p-2 transition-colors", isDropTarget && "ring-2 ring-primary/30", group === "none" && "border-dashed")}
-    >
-      <div className="flex items-baseline gap-2 px-1 pb-1">
-        <span className={cn("text-xs font-semibold", group === "A" && "text-primary")}>{label}</span>
-        <span className="text-[11px] text-muted-foreground">{hint}</span>
-      </div>
-      <ul className="min-h-8 space-y-1">{children}</ul>
-      {empty && <div className="px-1 pb-1 text-xs text-muted-foreground/70">Drag items here</div>}
+    <section ref={ref} className={cn("-mx-3 rounded-lg pt-2 pb-1 transition-[background-color,outline-color] duration-180 ease-out", dropZone(state))}>
+      {/* The label heads the check column and the empty line sits in the title column, so the
+          grip gutter stays clear (the grip only shows on hover, focus and touch). */}
+      <GroupLabel label={label} hint={hint} className="pr-3 pl-10" />
+      <ul>{children}</ul>
+      {ids.length === 0 && <p className="flex min-h-10 items-center pr-3 pl-18 text-sm text-muted-foreground">Drag a task here, or add one below.</p>}
     </section>
   );
 }
 
 function PriorityItem({ task, index, group, date }: { task: Task; index: number; group: Group; date: string }) {
   const handle = useRef<HTMLButtonElement | null>(null);
-  const { ref, isDragging } = useSortable({ id: task.id, index, group, type: "item", accept: "item", handle, sensors: cardSensors });
+  const { ref } = useSortable({ id: task.id, index, group, type: "item", accept: "item", handle, sensors: cardSensors });
   const roles = useRolesMap();
   const role = task.roleId ? roles.get(task.roleId) : undefined;
   const toggle = useToggleDone();
   const { openTask, openFocus } = useAppState();
   const done = task.status === "done";
+  const pastDue = !!task.dueDate && task.dueDate < date;
 
   return (
-    <li
+    <Row
+      as="li"
       ref={ref}
+      divided
+      done={done}
       className={cn(
-        "group flex items-center gap-2 rounded-lg border bg-background px-1.5 py-1.5 text-sm",
-        isDragging && "opacity-50 shadow-lg",
+        "before:left-18",
+        // The lifted row gets the sheet's surface (dnd-kit's own top-layer reset would leave it clear).
+        "not-data-[dnd-placeholder]:data-[dnd-dragging]:bg-card! not-data-[dnd-placeholder]:data-[dnd-dragging]:ring-1 not-data-[dnd-placeholder]:data-[dnd-dragging]:ring-edge",
+        // The origin slot is a dashed ghost (global rule); no hairline inside it.
+        "data-[dnd-placeholder]:before:hidden",
       )}
     >
-      <button ref={handle} type="button" className="cursor-grab text-muted-foreground/50 hover:text-foreground active:cursor-grabbing" aria-label="Drag to reorder">
+      <button
+        ref={handle}
+        type="button"
+        aria-label="Drag to reorder"
+        className={cn(
+          "relative -mr-1 -ml-1 grid size-6 shrink-0 cursor-grab place-items-center rounded-xs text-faint-foreground opacity-0 transition-[opacity,color] duration-120 group-hover/row:opacity-100 hover:text-foreground focus-visible:opacity-100 active:cursor-grabbing pointer-coarse:opacity-100",
+          // A touch hit area that grows up, down and outward, away from the check beside it.
+          "pointer-coarse:after:absolute pointer-coarse:after:-inset-y-2.5 pointer-coarse:after:right-0 pointer-coarse:after:-left-2.5",
+        )}
+      >
         <GripVertical className="size-4" />
       </button>
-      <button
-        type="button"
-        onClick={() => toggle(task)}
-        aria-label={done ? "Mark as not done" : "Mark as done"}
-        className={cn("grid size-5 shrink-0 place-items-center rounded-md border-2", done ? "border-primary bg-primary text-primary-foreground" : "hover:border-primary")}
-        style={!done && role ? { borderColor: role.color } : undefined}
-      >
-        {done && <Check className="size-3.5" />}
-      </button>
-      <button type="button" onClick={() => openTask(task.id)} className="min-w-0 flex-1 text-left">
-        <span className={cn("flex items-center gap-1.5", done && "text-muted-foreground line-through")}>
-          {task.kind === "goal" && <Mountain className="size-3.5 shrink-0 text-primary" />}
-          <span className="truncate">{task.title}</span>
+      <DoneCheck done={done} onToggle={() => toggle(task)} color={role?.color} celebrate={task.kind === "goal" && task.quadrant === 2} />
+      <button type="button" onClick={() => openTask(task.id)} className="min-w-0 flex-1 rounded-xs text-left focus-ring-inset">
+        <span className="flex min-w-0 items-center gap-1.5">
+          {task.kind === "goal" && <Mountain className="size-3.5 shrink-0 text-muted-foreground" />}
+          <RowTitle>{task.title}</RowTitle>
         </span>
-        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          {role && (
-            <>
-              <RoleDot color={role.color} /> {role.name}
-            </>
+        {/* From `sm` one line that never wraps: the role name gives way first. Below `sm` the quadrant
+            joins the role, and the due date drops to its own line when both don't fit, so the role
+            name stays readable. */}
+        <RowMeta as="span" className={cn("max-sm:gap-x-2 sm:flex-nowrap", !role && !task.dueDate && "sm:hidden")}>
+          <span className="flex min-w-0 items-center gap-x-2 sm:contents">
+            <QuadrantBadge q={task.quadrant} size="xs" className="sm:hidden" />
+            {role && (
+              <span className="flex min-w-0 items-center gap-1.5">
+                <RoleDot color={role.color} />
+                <span className="truncate">{role.name}</span>
+              </span>
+            )}
+          </span>
+          {/* No separator where the line may wrap: it would dangle at a line end. */}
+          {role && task.dueDate && <MetaSep className="max-sm:hidden" />}
+          {task.dueDate && (
+            <span className={cn("flex shrink-0 items-center gap-1 whitespace-nowrap", pastDue && "text-warning")}>
+              <CalendarClock />
+              {pastDue ? "was due" : "due"} {relativeDay(task.dueDate, date)}
+            </span>
           )}
-          {task.dueDate && <span>· due {relativeDay(task.dueDate, date)}</span>}
-        </span>
+        </RowMeta>
       </button>
-      <QuadrantBadge q={task.quadrant} size="xs" />
       {!done && (
-        <div className="flex opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
-          <Button variant="ghost" size="icon-xs" onClick={() => openFocus(task.id)} aria-label="Focus on this" title="Focus">
-            <Crosshair />
-          </Button>
+        <RowActions className="has-aria-expanded:opacity-100 pointer-coarse:gap-4">
+          <IconButton size="icon-xs" label="Focus on this" icon={<Crosshair />} onClick={() => openFocus(task.id)} />
           <MoveButton task={task} date={date} />
-        </div>
+        </RowActions>
       )}
-    </li>
+      {/* After the actions, so the badges line up on the right edge whether or not a row has actions. */}
+      <QuadrantBadge q={task.quadrant} size="xs" className="max-sm:hidden" />
+    </Row>
   );
 }
 
@@ -200,6 +235,7 @@ function MoveButton({ task, date }: { task: Task; date: string }) {
   const [reason, setReason] = useState<RescheduleReason>("not_today");
   const [other, setOther] = useState<string | null>(null);
   const { reschedule } = useTaskActions();
+  const whyId = useId();
   const go = (toDate: string | null) => {
     reschedule.mutate(
       { id: task.id, toDate, reason },
@@ -215,24 +251,19 @@ function MoveButton({ task, date }: { task: Task; date: string }) {
   const tomorrow = addDaysISO(date, 1);
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger render={<Button variant="ghost" size="icon-xs" aria-label="Move to another day" title="Move" />}>
-        <ArrowRightFromLine />
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-72">
-        <div className="text-sm font-medium">Why move it?</div>
-        <div className="flex flex-wrap gap-1">
+      <PopoverTrigger render={<IconButton size="icon-xs" label="Move to another day" icon={<ArrowRightFromLine />} />} />
+      <PopoverContent align="end" className="w-88">
+        <p id={whyId} className="text-sm font-medium">
+          Why move it?
+        </p>
+        <div role="group" aria-labelledby={whyId} className="flex flex-wrap gap-1.5">
           {REASONS.map((r) => (
-            <button
-              key={r.value}
-              type="button"
-              onClick={() => setReason(r.value)}
-              className={cn("rounded-full border px-2 py-0.5 text-xs", reason === r.value ? "border-primary bg-primary/10 text-primary" : "hover:bg-muted")}
-            >
+            <ChoiceChip key={r.value} selection="single" pressed={reason === r.value} onClick={() => setReason(r.value)} className="h-7 px-2.5 text-xs">
               {r.label}
-            </button>
+            </ChoiceChip>
           ))}
         </div>
-        <div className="text-sm font-medium">Move to</div>
+        <p className="mt-1 border-t border-border-subtle pt-3 text-sm font-medium">Move to</p>
         <div className="flex flex-wrap items-center gap-1.5">
           <Button size="sm" variant="outline" onClick={() => go(tomorrow)}>
             Tomorrow
@@ -250,19 +281,16 @@ function MoveButton({ task, date }: { task: Task; date: string }) {
 function AddPriority({ onAdd }: { onAdd: (title: string) => void }) {
   const [value, setValue] = useState("");
   return (
-    <form
-      className="flex items-center gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
+    <QuickAdd
+      value={value}
+      onValueChange={setValue}
+      onSubmit={() => {
         if (!value.trim()) return;
         onAdd(value.trim());
         setValue("");
       }}
-    >
-      <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder="Add a priority for today…" className="h-9" />
-      <Button type="submit" variant="outline" size="icon" disabled={!value.trim()} aria-label="Add priority">
-        <Plus />
-      </Button>
-    </form>
+      placeholder="Add a priority for today…"
+      aria-label="Add priority"
+    />
   );
 }
