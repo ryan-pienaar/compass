@@ -4,7 +4,7 @@ import { ListChecks, Mountain } from "lucide-react";
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { fromISODate } from "@shared/dates.ts";
 import type { Block, Role, Task } from "@/lib/api";
-import { formatMinutes, fmtDate } from "@/lib/format";
+import { formatDuration, formatMinutes, fmtDate } from "@/lib/format";
 import { useNow } from "@/lib/hooks";
 import { cardSensors } from "@/lib/dnd";
 import { cn } from "@/lib/utils";
@@ -488,7 +488,7 @@ function BlockBody({ block, endMin, tier, height }: { block: Block; endMin: numb
           </EventTitle>
         </div>
         <EventTime className="truncate text-2xs">
-          {formatMinutes(block.startMin)}–{formatMinutes(endMin)}
+          {formatMinutes(block.startMin)}–{formatMinutes(endMin)} <MetaSep /> {formatDuration(endMin - block.startMin)}
         </EventTime>
       </>
     );
@@ -576,8 +576,8 @@ function GridBlock({
       className={cn(eventBlockVariants({ kind: block.kind, layout: "grid" }), "group absolute z-5 flex flex-col p-0", hidden && dragSource)}
       style={{ ...style, height, ...roleVar(role) }}
     >
-      {/* The tooltip gives the full title and time, which short blocks clip or leave out. It opens to the
-          right so it never covers the slot a drag would land in. */}
+      {/* The tooltip gives the full title, time and duration, which narrow or short blocks clip or leave
+          out. It opens to the right so it never covers the slot a drag would land in. */}
       <Tooltip>
         <TooltipTrigger
           delay={600}
@@ -586,7 +586,7 @@ function GridBlock({
               ref={handleRef}
               role="button"
               tabIndex={0}
-              aria-label={`${title}, ${formatMinutes(block.startMin)}–${formatMinutes(endMin)}`}
+              aria-label={`${title}, ${formatMinutes(block.startMin)}–${formatMinutes(endMin)}, ${formatDuration(endMin - block.startMin)}`}
               onClick={() => onOpen(block)}
               onKeyDown={(e) => e.key === "Enter" && onOpen(block)}
               className={cn(
@@ -599,7 +599,7 @@ function GridBlock({
           <BlockBody block={block} endMin={endMin} tier={tier} height={height} />
         </TooltipTrigger>
         <TooltipContent side="right" className="tabular-nums">
-          {title} · {formatMinutes(block.startMin)}–{formatMinutes(endMin)}
+          {title} · {formatMinutes(block.startMin)}–{formatMinutes(endMin)} · {formatDuration(endMin - block.startMin)}
         </TooltipContent>
       </Tooltip>
       <div

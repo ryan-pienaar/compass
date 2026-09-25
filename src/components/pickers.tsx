@@ -47,9 +47,10 @@ export function RoleSelect({
     ...list.map((r) => ({
       value: r.id,
       label: (
-        <span className="flex items-center gap-2">
+        // The name truncates on its own: an ellipsis can't apply to text inside a flex row.
+        <span className="flex min-w-0 items-center gap-2">
           <RoleDot color={r.color} />
-          {r.name}
+          <span className="truncate">{r.name}</span>
         </span>
       ),
     })),
@@ -59,7 +60,8 @@ export function RoleSelect({
       <SelectTrigger id={id} size={size} variant={variant} className={cn("w-fit min-w-40", className)}>
         <SelectValue />
       </SelectTrigger>
-      <SelectContent>
+      {/* At least the trigger's width, wider for a long role name (up to 20rem) so names show in full. */}
+      <SelectContent className="w-max min-w-[max(11rem,var(--anchor-width))] max-w-[min(20rem,var(--available-width))]">
         {items.map((it) => (
           <SelectItem key={it.value} value={it.value}>
             {it.label}

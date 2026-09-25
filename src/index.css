@@ -358,7 +358,7 @@
     -webkit-tap-highlight-color: transparent;
   }
   body { @apply bg-background text-foreground antialiased; position: relative; }
-  #root { isolation: isolate; }
+  /* #root is deliberately NOT isolated: the toaster lives inside it and must stack above the dialogs and sheets Base UI portals to <body>. In-page z-indices stop at 30; popups are 50. */
   h1, h2, h3 { text-wrap: balance; }
   p { text-wrap: pretty; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary, label[for] { cursor: pointer; }

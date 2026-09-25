@@ -403,7 +403,7 @@ Replace the whole of `src/index.css` with the block below (owner: F1). It is a c
     -webkit-tap-highlight-color: transparent;
   }
   body { @apply bg-background text-foreground antialiased; position: relative; }
-  #root { isolation: isolate; }
+  /* #root is deliberately NOT isolated: the toaster lives inside it and must stack above the dialogs and sheets Base UI portals to <body>. In-page z-indices stop at 30; popups are 50. */
   h1, h2, h3 { text-wrap: balance; }
   p { text-wrap: pretty; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary, label[for] { cursor: pointer; }
@@ -1025,7 +1025,7 @@ export const tooltipMotion =
     sticky bottom-0 z-10 -mx-6 -mb-6 mt-1 flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle bg-popover px-6 py-4 max-sm:-mx-5 max-sm:-mb-5 max-sm:px-5
     ```
     `start` renders first in `<div className="mr-auto flex items-center gap-2">`. This replaces every `sm:justify-between` and `<span />` spacer.
-  - The footer is sticky, so long dialogs scroll with the actions always visible.
+  - The footer is sticky, so long dialogs scroll with the actions always visible. `DialogContent` adds `scroll-pb-24` so a field focused from the keyboard scrolls clear of it (§9), and on Tab into a textarea it scrolls the whole field into view (the browser reveals only the caret).
 - **AlertDialog** (`ui/alert-dialog.tsx`)
   - Same overlay and content recipe, `size` default `sm`, centred.
   - Footer: as the Dialog footer, without `sticky`.
@@ -1065,7 +1065,7 @@ export const tooltipMotion =
     ```
   - **Shortcut:** `<Kbd className="ml-auto">`. **Empty:** `py-8 text-center text-sm text-muted-foreground`.
   - **New `CommandFooter`:** `flex h-10 items-center gap-4 border-t border-border-subtle px-4 text-2xs text-muted-foreground`.
-- **Toaster** (`ui/sonner.tsx`). Sonner's CSS is unlayered, so every override needs `!`.
+- **Toaster** (`ui/sonner.tsx`). Sonner's CSS is unlayered, so every override needs `!`. It renders inside `#root` (unchanged from before the overhaul), which is why `#root` must not become a stacking context (§2): toasts have to stay above dialogs and sheets.
   - **Style:** `{ "--normal-bg": "var(--popover)", "--normal-text": "var(--foreground)", "--normal-border": "transparent", "--border-radius": "12px", "--width": "380px" }`.
   - **`classNames`:**
 
@@ -1425,7 +1425,7 @@ One completion control replaces the four hand-rolled checks and the task-sheet C
     |---|---|
     | `xs` | one line, title only, `text-2xs font-medium`, `py-0` |
     | `sm` | one line "Title · 9:30", `text-xs`, `py-0.5` |
-    | `md` | title `text-xs font-medium line-clamp-2`, then time `text-2xs` on its own line, `py-1` |
+    | `md` | title `text-xs font-medium line-clamp-2`, then time and duration (`09:00–10:30 · 1h 30m`) `text-2xs` on its own line, `py-1` |
 
   - Blocks of 20 minutes or less still show a title. Never a tooltip-only bar.
 - **`motion.ts`** (new, F4): `useEnterOnce()` returns `(index: number) => ({ className?, style? })`.
@@ -1974,7 +1974,7 @@ Each screen lists its layout, components, what to remove and its **signature** d
   - This gives a **focus trap**, **initial focus on Done** (`initialFocus` ref) and **focus returned to the trigger**.
   - `onOpenChange` ignores the `escape-key` reason, so the existing `useHotkeys("escape")` stays the single close path.
   - Keep `aria-label="Focus mode"`.
-- **Top bar:** `flex h-14 items-center justify-between px-5`, with the eyebrow "Focus" (`text-xs font-medium text-muted-foreground`), `<Kbd>Esc</Kbd>` and `IconButton` X "Leave focus mode".
+- **Top bar:** `flex h-14 items-center justify-between px-5`, with the eyebrow "Focus" (`text-xs font-medium text-muted-foreground`), `<Kbd>Esc</Kbd>` and a ghost `icon` Button X `aria-label="Leave focus mode"`. No tooltip: an open tooltip would take the first Esc from the hotkey.
 - **Centre:** `mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-10 px-6 pb-16 text-center`.
   - **Why-chain:** mission `voice-sm italic line-clamp-2 text-muted-foreground`, then `flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground` holding RoleBadge, "toward {goal}" and `QuadrantBadge withLabel`.
   - **Title:** `voice-display text-4xl sm:text-5xl`.

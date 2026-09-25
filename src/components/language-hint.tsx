@@ -52,8 +52,15 @@ export function LanguageHint({
     const all = analyzeLanguage(text);
     return settings.languageCoach === "strong" ? all.filter((m) => m.severity === "strong") : all;
   }, [text, settings.languageCoach]);
-  // The phrase that was dismissed. A different phrase brings the hint back.
+  // The phrase that was dismissed. It resets whenever the matched phrase changes (another phrase, or none
+  // after the field is cleared), so the same phrase in a later entry brings the hint back.
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const matched = matches[0]?.text ?? null;
+  const [lastMatched, setLastMatched] = useState(matched);
+  if (matched !== lastMatched) {
+    setLastMatched(matched);
+    setDismissed(null);
+  }
   const noteRef = useRef<HTMLDivElement>(null);
 
   if (matches.length === 0) return null;

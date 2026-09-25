@@ -45,6 +45,9 @@ const dialogFooterClassName =
 
 const dialogFooterStickyClassName = "sticky -bottom-6 z-10 max-sm:-bottom-5"
 
+/** Scroll padding on Dialog's scroller so a field focused from the keyboard lands clear of the sticky footer. */
+const dialogContentScrollPaddingClassName = "scroll-pb-24"
+
 function DialogFooterStart({ children }: { children: React.ReactNode }) {
   return (
     <div data-slot="dialog-footer-start" className="mr-auto flex items-center gap-2">
@@ -88,6 +91,7 @@ function DialogContent({
   showCloseButton = true,
   size = "md",
   placement = "center",
+  onKeyUp,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
@@ -103,10 +107,21 @@ function DialogContent({
         data-placement={placement}
         className={cn(
           dialogContentClassName,
+          dialogContentScrollPaddingClassName,
           dialogSizeClassName[size],
           dialogPlacementClassName[placement],
           className
         )}
+        onKeyUp={(event) => {
+          // Tabbing into a textarea scrolls only its caret into view, which can leave the rest of the field
+          // under the sticky footer: bring the whole field in (scroll padding applies). Keyboard only, so a
+          // click never scrolls the text under the pointer; portaled popups are excluded.
+          const field = document.activeElement
+          if (event.key === "Tab" && field instanceof HTMLTextAreaElement && event.currentTarget.contains(field)) {
+            field.scrollIntoView({ block: "nearest" })
+          }
+          onKeyUp?.(event)
+        }}
         {...props}
       >
         {children}

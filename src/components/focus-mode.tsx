@@ -12,7 +12,6 @@ import { useTaskActions } from "@/lib/mutations";
 import { goalsQuery, missionQuery, taskQuery } from "@/lib/queries";
 import { useAppState } from "./app-state";
 import { QuadrantBadge, RoleBadge } from "./badges";
-import { IconButton } from "./icon-button";
 import { MeterRing } from "./meter";
 
 /** One thing, with the "why" chain above it. Everything else can wait. */
@@ -122,7 +121,7 @@ function FocusView({ id, onClose }: { id: string; onClose: () => void }) {
           ref={popupRef}
           aria-modal="true"
           aria-label="Focus mode"
-          // Done, or the popup itself while the task loads (never the X: its tooltip would take the first Esc).
+          // Done, or the popup itself while the task loads.
           initialFocus={() => doneRef.current ?? popupRef.current}
           className="fixed inset-0 z-50 flex flex-col overflow-y-auto overscroll-contain bg-background outline-hidden animate-in fade-in-0 zoom-in-98 duration-240"
         >
@@ -132,7 +131,10 @@ function FocusView({ id, onClose }: { id: string; onClose: () => void }) {
               <Kbd aria-hidden className="pointer-coarse:hidden">
                 Esc
               </Kbd>
-              <IconButton label="Leave focus mode" icon={<X />} size="icon" tooltipSide="bottom" onClick={close} />
+              {/* No tooltip (unlike IconButton): an open tooltip would take the first Esc from the hotkey. */}
+              <Button variant="ghost" size="icon" onClick={close} aria-label="Leave focus mode">
+                <X />
+              </Button>
             </div>
           </div>
           <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-10 px-6 pb-16 text-center">
